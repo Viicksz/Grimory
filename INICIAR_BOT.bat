@@ -17,13 +17,18 @@ if not exist "main.py" (
     exit /b 1
 )
 
-where py >nul 2>&1
-if %errorlevel%==0 (set "PYTHON=py -3") else (
-    where python >nul 2>&1
-    if %errorlevel%==0 (set "PYTHON=python") else (
-        echo [ERRO] Python nao foi encontrado.
-        pause
-        exit /b 1
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON=.venv\Scripts\python.exe"
+) else (
+    where py >nul 2>&1
+    if %errorlevel%==0 (set "PYTHON=py -3") else (
+        where python >nul 2>&1
+        if %errorlevel%==0 (set "PYTHON=python") else (
+            echo [ERRO] Python nao foi encontrado.
+            echo Instale o Python ou crie o ambiente virtual .venv nesta pasta.
+            pause
+            exit /b 1
+        )
     )
 )
 
