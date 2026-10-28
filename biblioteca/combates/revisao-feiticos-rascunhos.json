@@ -1,0 +1,269 @@
+{
+  "DCAT/Arania Exumai.md": {
+    "perfil": {
+      "versao": 2,
+      "estado": "rascunho",
+      "mira": "Lampejo",
+      "detalhes_mira": "",
+      "tipo_acao": "Padrão",
+      "ativacao": "Instantânea",
+      "gatilho": "",
+      "duracao": {
+        "valor": "",
+        "unidade": "Instantâneo"
+      },
+      "alcance": "Longo",
+      "detalhes_alcance": "",
+      "alvo": "Área",
+      "detalhes_alvo": "",
+      "area": "",
+      "tipos": [
+        "Proteção",
+        "Controle"
+      ],
+      "efeitos": [],
+      "respostas": [
+        "Vontade",
+        "Fortitude",
+        "Esquiva"
+      ],
+      "acumulo": "Substitui o anterior",
+      "encerramento": "",
+      "concentracao": {
+        "exigida": false,
+        "pericia": "Vontade",
+        "cd": "Mesma CD do feitiço",
+        "gatilho": "Sempre que houver uma distração"
+      },
+      "protecao": {
+        "pv": "",
+        "cobertura": "",
+        "reducao": ""
+      },
+      "dano": {
+        "inicial": "",
+        "tipo_inicial": "",
+        "sustentado": "",
+        "tipo_sustentado": "",
+        "frequencia": ""
+      },
+      "cura": {
+        "formula": "",
+        "recurso": "",
+        "frequencia": ""
+      },
+      "defesa": {
+        "momento": "Não é defesa",
+        "ajuste_cd_reacao": 0,
+        "ocasioes": "",
+        "propriedades": []
+      },
+      "contra_feitico": {
+        "habilitado": false,
+        "momento": "",
+        "feiticos": [],
+        "propriedades": [],
+        "resultado": ""
+      }
+    },
+    "descricao": "Feitiço defensivo usado contra aracnídeos comuns ou mágicos, projetando uma força repelente capaz de afastar, atordoar ou derrubar criaturas desse tipo. Contra aranhas pequenas, o impacto costuma bastar para neutralizá-las imediatamente; contra criaturas mágicas maiores, como acromântulas, o efeito tende a ser menos absoluto, servindo para empurrar, interromper avanço e causar atordoamento moderado.\n**O alvo deve realizar um teste de Fortitude para tentar resistir ao feitiço.**\n**Em caso de falha, aracnídeos comuns desmaiam, enquanto aracnídeos mágicos são empurrados para trás e ficam atordoados brevemente.**"
+  },
+  "Encantamentos/Collare.md": {
+    "perfil": {
+      "versao": 2,
+      "estado": "rascunho",
+      "mira": "",
+      "detalhes_mira": "",
+      "tipo_acao": "",
+      "ativacao": "",
+      "gatilho": "",
+      "duracao": {
+        "valor": "",
+        "unidade": ""
+      },
+      "alcance": "",
+      "detalhes_alcance": "",
+      "alvo": "",
+      "detalhes_alvo": "",
+      "area": "",
+      "tipos": [],
+      "efeitos": [],
+      "respostas": [],
+      "acumulo": "",
+      "encerramento": "",
+      "concentracao": {
+        "exigida": false,
+        "pericia": "Vontade",
+        "cd": "Mesma CD do feitiço",
+        "gatilho": "Sempre que houver uma distração"
+      },
+      "protecao": {
+        "pv": "",
+        "cobertura": "",
+        "reducao": ""
+      },
+      "dano": {
+        "inicial": "",
+        "tipo_inicial": "",
+        "sustentado": "",
+        "tipo_sustentado": "",
+        "frequencia": ""
+      },
+      "cura": {
+        "formula": "",
+        "recurso": "",
+        "frequencia": ""
+      },
+      "defesa": {
+        "momento": "Não é defesa",
+        "ajuste_cd_reacao": 0,
+        "ocasioes": "",
+        "propriedades": []
+      },
+      "contra_feitico": {
+        "habilitado": false,
+        "momento": "",
+        "feiticos": [],
+        "propriedades": [],
+        "resultado": ""
+      }
+    },
+    "descricao": "Une permanentemente dois objetos por meio de magia, formando uma ligação invisível e extremamente resistente. A junção não apresenta vestígios de cola ou solda, podendo ser desfeita apenas por magia apropriada."
+  },
+  "Encantamentos/Accio.md": {
+    "perfil": {
+      "versao": 2,
+      "estado": "completa",
+      "mira": "Intuição",
+      "detalhes_mira": "",
+      "tipo_acao": "Padrão",
+      "ativacao": "Sustentada",
+      "gatilho": "",
+      "duracao": {
+        "valor": "",
+        "unidade": "Instantâneo"
+      },
+      "alcance": "Especial",
+      "detalhes_alcance": "Infinito, quanto maior a distância mais complexo o feitiço",
+      "alvo": "Objeto",
+      "detalhes_alvo": "",
+      "area": "",
+      "tipos": [],
+      "efeitos": [
+        {
+          "tipo": "Utilidade",
+          "texto": "Convoca um objeto distante.",
+          "alvo": "",
+          "valor": "",
+          "condicao": "",
+          "remocao": ""
+        }
+      ],
+      "respostas": [
+        "Nenhuma"
+      ],
+      "acumulo": "Substitui o anterior",
+      "encerramento": "Assim que o objeto for interceptado pelo conjurador, ou até que o mesmo perca a concentração.",
+      "concentracao": {
+        "exigida": true,
+        "pericia": "Vontade",
+        "cd": "Mesma CD do feitiço",
+        "gatilho": "Sempre que houver uma distração"
+      },
+      "protecao": {
+        "pv": "",
+        "cobertura": "",
+        "reducao": ""
+      },
+      "dano": {
+        "inicial": "",
+        "tipo_inicial": "",
+        "sustentado": "",
+        "tipo_sustentado": "",
+        "frequencia": ""
+      },
+      "cura": {
+        "formula": "",
+        "recurso": "",
+        "frequencia": ""
+      },
+      "defesa": {
+        "momento": "Não é defesa",
+        "ajuste_cd_reacao": 0,
+        "ocasioes": "",
+        "propriedades": []
+      },
+      "contra_feitico": {
+        "habilitado": false,
+        "momento": "",
+        "feiticos": [],
+        "propriedades": [],
+        "resultado": ""
+      },
+      "revisado_em": "2026-09-05T12:40:54"
+    },
+    "descricao": "Permite convocar um objeto ou alvo conhecido à distância, fazendo com que ele se desloque rapidamente até o conjurador. Para que o feitiço funcione corretamente, o bruxo deve conhecer ou ter uma noção da localização geral do alvo. Quanto maior a distância, mais obstáculos existirem entre o objeto e o conjurador ou mais pesado ele for, maior será a dificuldade para atraí-lo."
+  },
+  "Transfiguração/Reducto.md": {
+    "perfil": {
+      "versao": 2,
+      "estado": "rascunho",
+      "mira": "",
+      "detalhes_mira": "",
+      "tipo_acao": "",
+      "ativacao": "",
+      "gatilho": "",
+      "duracao": {
+        "valor": "",
+        "unidade": ""
+      },
+      "alcance": "",
+      "detalhes_alcance": "",
+      "alvo": "",
+      "detalhes_alvo": "",
+      "area": "",
+      "tipos": [],
+      "efeitos": [],
+      "respostas": [],
+      "acumulo": "",
+      "encerramento": "",
+      "concentracao": {
+        "exigida": false,
+        "pericia": "Vontade",
+        "cd": "Mesma CD do feitiço",
+        "gatilho": "Sempre que houver uma distração"
+      },
+      "protecao": {
+        "pv": "",
+        "cobertura": "",
+        "reducao": ""
+      },
+      "dano": {
+        "inicial": "",
+        "tipo_inicial": "",
+        "sustentado": "",
+        "tipo_sustentado": "",
+        "frequencia": ""
+      },
+      "cura": {
+        "formula": "",
+        "recurso": "",
+        "frequencia": ""
+      },
+      "defesa": {
+        "momento": "Não é defesa",
+        "ajuste_cd_reacao": 0,
+        "ocasioes": "",
+        "propriedades": []
+      },
+      "contra_feitico": {
+        "habilitado": true,
+        "momento": "Reversão ou tratamento",
+        "feiticos": [],
+        "propriedades": [],
+        "resultado": ""
+      }
+    },
+    "descricao": "Projeta um poderoso feitiço de impacto capaz de danificar ou destruir objetos, sendo amplamente utilizado para abrir caminho através de obstáculos ou comprometer equipamentos durante um combate.\n**Além do dano causado ao portador, o objeto atingido perde 1 Ponto de Vida.**"
+  }
+}
