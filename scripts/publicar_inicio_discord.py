@@ -1,15 +1,35 @@
-"""Publica uma versão revisada do canal Inicio via webhook do Discohook."""
+"""Atualiza mensagens existentes do canal Início via webhook do Discohook."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+from pathlib import Path
 
 import aiohttp
+from dotenv import dotenv_values
 
 
-WEBHOOK = os.environ.get("GRIMORY_QUADRIBOL_WEBHOOK", "").strip()
+RAIZ_PROJETO = Path(__file__).resolve().parents[1]
+CONFIGURACAO = {
+    **dotenv_values(RAIZ_PROJETO / ".env.quadribol"),
+    **dotenv_values(RAIZ_PROJETO / ".env.discord-webhook"),
+}
+WEBHOOK = (
+    os.environ.get("GRIMORY_QUADRIBOL_WEBHOOK")
+    or CONFIGURACAO.get("GRIMORY_QUADRIBOL_WEBHOOK")
+    or ""
+).strip()
+IDS_MENSAGENS_EXISTENTES = tuple(
+    item.strip()
+    for item in (
+        os.environ.get("GRIMORY_INICIO_MESSAGE_IDS")
+        or CONFIGURACAO.get("GRIMORY_INICIO_MESSAGE_IDS")
+        or ""
+    ).split(",")
+    if item.strip()
+)
 
 
 EMBEDS = [
@@ -366,7 +386,12 @@ if _indice_visual is not None:
 async def publicar() -> str:
     if not WEBHOOK:
         raise RuntimeError("Defina GRIMORY_QUADRIBOL_WEBHOOK antes de publicar.")
-    url = WEBHOOK + ("&" if "?" in WEBHOOK else "?") + "wait=true"
+    if not IDS_MENSAGENS_EXISTENTES:
+        raise RuntimeError(
+            "Defina GRIMORY_INICIO_MESSAGE_IDS com os IDs, separados por vírgula, "
+            "das mensagens existentes que serão atualizadas. O script não cria mensagens."
+        )
+    url = WEBHOOK.split("?", 1)[0].rstrip("/")
     timeout = aiohttp.ClientTimeout(total=30)
     def tamanho_embed(embed: dict) -> int:
         return (
@@ -387,9 +412,14 @@ async def publicar() -> str:
         tamanho += custo
     if lote:
         lotes.append(lote)
+    if len(IDS_MENSAGENS_EXISTENTES) != len(lotes):
+        raise RuntimeError(
+            f"A publicação foi dividida em {len(lotes)} mensagens; informe exatamente "
+            f"{len(lotes)} IDs existentes em GRIMORY_INICIO_MESSAGE_IDS."
+        )
     respostas = []
     async with aiohttp.ClientSession(timeout=timeout) as sessao:
-        for lote in lotes:
+        for lote, mensagem_id in zip(lotes, IDS_MENSAGENS_EXISTENTES):
             payload = {"username": "Grimory", "embeds": lote}
             if any(embed.get("title") == "👤 Nome da personagem" for embed in lote):
                 payload["content"] = (
@@ -398,7 +428,7 @@ async def publicar() -> str:
                     "## *Ficha de Personagem • Players*\n"
                     "## ══════◄•• 👤 ••►══════"
                 )
-            async with sessao.post(url, json=payload) as resposta:
+            async with sessao.patch(f"{url}/messages/{mensagem_id}", json=payload) as resposta:
                 corpo = await resposta.text()
                 if resposta.status >= 400:
                     raise RuntimeError(f"Discord recusou a publicação ({resposta.status}): {corpo}")

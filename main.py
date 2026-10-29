@@ -28,6 +28,8 @@ from comandos.xp import XP
 
 
 load_dotenv(encoding="utf-8-sig")
+load_dotenv(".env.discord-webhook", encoding="utf-8-sig")
+# Compatibilidade temporária com o nome usado antes, inclusive em outro PC.
 load_dotenv(".env.quadribol", encoding="utf-8-sig")
 
 TOKEN = os.getenv("GRIMORY_DISCORD_TOKEN") or os.getenv("DISCORD_TOKEN")

@@ -21,16 +21,6 @@
   "tipos": [
     "Controle"
   ],
-  "efeitos": [
-    {
-      "tipo": "Controle",
-      "texto": "Permite controlar elementos básicos",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Nenhuma"
   ],

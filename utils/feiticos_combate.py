@@ -32,6 +32,7 @@ TIPOS_EFEITO = (
     "Invocação",
     "Transformação",
     "Utilidade",
+    "Contra-feitiço",
 )
 MOMENTOS_DEFESA = ("Não é defesa", "Antecipada", "Reação", "Ambas")
 MOMENTOS_CONTRA_FEITICO = (
@@ -70,10 +71,11 @@ def perfil_vazio() -> dict[str, Any]:
         "detalhes_alvo": "",
         "area": "",
         "tipos": [],
-        "efeitos": [],
         "respostas": [],
         "acumulo": "",
         "encerramento": "",
+        "encerramento_tipo": "",
+        "contramagia": "",
         "concentracao": {
             "exigida": False,
             "pericia": "Vontade",
@@ -115,6 +117,8 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
         else:
             perfil[chave] = deepcopy(valor)
     perfil["versao"] = 2
+    # Descrições narrativas de efeitos duplicam a descrição principal do feitiço.
+    perfil.pop("efeitos", None)
 
     mira = str(perfil.get("mira", "")).strip()
     if mira and mira not in MIRAS:
@@ -324,13 +328,14 @@ def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
     # demais ativações, a duração continua aparecendo separadamente.
     if duracao and duracao.casefold() != "instantâneo.":
         linhas.append(duracao)
+    contramagia = str(perfil.get("contramagia", "")).strip()
+    if contramagia:
+        linhas.append(f"Contra-feitiço: {contramagia}.")
     protecao = perfil.get("protecao", {})
     if protecao.get("pv"):
         linhas.append(f"PV: {str(protecao['pv']).rstrip('.')}.")
-    for efeito in perfil.get("efeitos", []):
-        texto = str(efeito.get("texto", "") if isinstance(efeito, dict) else efeito).strip()
-        if texto:
-            linhas.append(texto.rstrip(".") + ".")
+    if protecao.get("cobertura"):
+        linhas.append(f"Cobertura: {str(protecao['cobertura']).strip().rstrip('.')}.")
     dano = perfil.get("dano", {})
     danos: list[str] = []
     if dano.get("inicial"):
@@ -378,6 +383,7 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         ("respostas", "resistência ou reação"),
         ("acumulo", "acúmulo"),
         ("encerramento", "interrupção ou encerramento"),
+        ("contramagia", "contra-feitiço deste feitiço"),
     ):
         if not perfil.get(chave):
             faltas.append(rotulo)
@@ -401,20 +407,16 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         faltas.append("cura")
     if "Proteção" in perfil.get("tipos", []) and not any(perfil.get("protecao", {}).values()):
         faltas.append("proteção")
-    tipos_descritivos = {
-        "Buff", "Debuff", "Controle", "Invocação", "Transformação", "Utilidade"
-    }
-    if tipos_descritivos.intersection(perfil.get("tipos", [])) and not perfil.get("efeitos"):
-        faltas.append("efeito estruturado")
     defesa = perfil.get("defesa", {})
     if defesa.get("momento") in {"Antecipada", "Reação", "Ambas"} and not (
         defesa.get("propriedades") or defesa.get("ocasioes")
     ):
         faltas.append("ocasiões da defesa")
     contra = perfil.get("contra_feitico", {})
-    if contra.get("habilitado"):
-        if not (contra.get("feiticos") or contra.get("propriedades")):
-            faltas.append("compatibilidade do contra-feitiço")
-        if not contra.get("resultado"):
-            faltas.append("resultado do contra-feitiço")
+    contra_selecionado = "Contra-feitiço" in perfil.get("tipos", [])
+    if contra_selecionado and not (contra.get("habilitado") and contra.get("momento")):
+        faltas.append("modo de uso do contra-feitiço")
+    if contra.get("habilitado") or contra_selecionado:
+        if not contra.get("feiticos"):
+            faltas.append("feitiço anulado selecionado na biblioteca")
     return faltas
