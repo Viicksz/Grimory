@@ -4,10 +4,10 @@ Tipo de ficha:
 Figuras de Autoridade
 
 Mensagem da Ficha no Discord:
-1540745877856198717
+1536071114617389195
 
 Mensagem da Ficha Parte 2 no Discord:
-1540745880746074205
+1536071117284970497
 
 Idade:
 --
@@ -31,7 +31,7 @@ Nível:
 8
 
 XP disponível:
-130
+210
 
 Familiar:
 Sapo-cururu amazônico (Rhaebo guttatus)
@@ -62,7 +62,7 @@ Galeões:
 0
 
 Pontos de Atributo disponíveis:
-28
+0
 
 Atributos:
 - Força: 10
@@ -124,7 +124,7 @@ Aptidões:
 - Arte das Trevas: 0
 
 Evolução da Herança Sanguínea:
-5
+2
 
 Escolha da Experiência Alquímica:
 --
@@ -145,23 +145,20 @@ Origens Mágicas:
 - --
 
 Especializações:
-- Curandeiro(a) e/ou Medibruxo(a)
+- --
 
 Efeitos de Habilidades Ativos:
 - --
 
 Informações:
-- {"titulo":"Altura e Idade","descricao":"--"}
 - {"titulo":"Cargo","descricao":"Medibruxa de Hogwarts"}
 - {"titulo":"Valores","descricao":"Precisão clínica, eficiência, disciplina durante o tratamento, recuperação completa, respeito ao paciente e decisões orientadas pelo melhor resultado médico."}
 - {"titulo":"Personalidade","descricao":"Calma, pragmática, reservada e absolutamente dedicada. Mantém distanciamento profissional sem perder a atenção ou o respeito pelos pacientes, dispensa julgamentos que não auxiliem o tratamento e demonstra severa intolerância à autonegligência médica e às interrupções desnecessárias na Ala Hospitalar."}
 - {"titulo":"Familiar","descricao":"Sapo-cururu amazônico (Rhaebo guttatus)\n_Pesquisadores identificaram peptídeos com forte potencial antibacteriano em sua secreção, o que pode ajudar no combate a superbactérias resistentes a remédios comuns._"}
 - {"titulo":"Patrono","descricao":"Polvo (Enteroctopus Dofleini)"}
 
-Itens:
-- --
-
 Feitiços favoritos:
+- {"nome":"Accio","categoria":"Encantamentos","descricao":"ag"}
 - {"nome":"Diagnoscernum","categoria":"Encantamentos","descricao":"Feitiço Diagnóstico — [Ver feitiço completo](https://discord.com/channels/935603393710424084/1528904524566364263/1528909071514730708)"}
 - {"nome":"Psicgnosis","categoria":"Encantamentos","descricao":"Análise de Psique — [Ver feitiço completo](https://discord.com/channels/935603393710424084/1528904569260609538/1528909193481031781)"}
 - {"nome":"Anapneo","categoria":"Encantamentos","descricao":"Desobstruir Vias Aéreas — [Ver feitiço completo](https://discord.com/channels/935603393710424084/1528904626479431691/1528909230881505485)"}
@@ -178,6 +175,9 @@ Feitiços favoritos:
 - {"nome":"Reparo Ossius","categoria":"Encantamentos","descricao":"Reparar Fraturas — [Ver feitiço completo](https://discord.com/channels/935603393710424084/1528904797510697075/1528909510935187477)"}
 - {"nome":"Renovare Membrum","categoria":"Encantamentos","descricao":"Membro Artificial — [Ver feitiço completo](https://discord.com/channels/935603393710424084/1528904827655033014/1528909570016149646)"}
 - {"nome":"Vitae Scandere","categoria":"Encantamentos","descricao":"Entre a Vida e a Morte — [Ver feitiço completo](https://discord.com/channels/935603393710424084/1528904827655033014/1528909590106869864)"}
+
+Poções favoritas:
+- --
 
 Imagens:
 - {"titulo":"Aparência","arquivo":"biblioteca/fichas/imagens/figuras-de-autoridade/dr-muerstein-02-restaurada.png"}
