@@ -1,5 +1,7 @@
 .env
 .env.quadribol
+# Webhook do Discord usado pelas publicações do Grimory.
+.env.discord-webhook
 __pycache__/
 *.pyc
 .venv/

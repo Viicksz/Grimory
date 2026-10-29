@@ -9,10 +9,15 @@ import sys
 from pathlib import Path
 
 import aiohttp
+from dotenv import dotenv_values
 
 RAIZ = Path(__file__).resolve().parents[1]
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
+CONFIGURACAO = {
+    **dotenv_values(RAIZ / ".env.quadribol"),
+    **dotenv_values(RAIZ / ".env.discord-webhook"),
+}
 
 from utils.quadribol import carregar_manobras
 
@@ -321,7 +326,11 @@ def main() -> None:
             )
         )
         return
-    webhook = os.environ.get("GRIMORY_QUADRIBOL_WEBHOOK", "").strip()
+    webhook = (
+        os.environ.get("GRIMORY_QUADRIBOL_WEBHOOK")
+        or CONFIGURACAO.get("GRIMORY_QUADRIBOL_WEBHOOK")
+        or ""
+    ).strip()
     if not webhook:
         raise SystemExit("Defina GRIMORY_QUADRIBOL_WEBHOOK antes de publicar.")
     if not IMAGEM_CINEMATICA.is_file() or not IMAGEM_CAMPO.is_file():

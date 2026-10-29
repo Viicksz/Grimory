@@ -34,7 +34,9 @@ from utils.fichas import (
     EMOJIS_PASTAS_FICHA,
     ORDEM_PASTAS_FICHA,
     FichaPersonagem,
+    PERICIAS,
     bonus_pericia,
+    modificador,
     paginas_fichas_alfabeticas,
     salvar_ficha,
 )
@@ -642,6 +644,40 @@ def _tipo_ataque_arma(arma: dict[str, str]) -> str:
 def _bonus_registrado(texto: str) -> int:
     encontrado = re.search(r"([+-]\s*\d+)\s*$", texto.strip())
     return int(encontrado.group(1).replace(" ", "")) if encontrado else 0
+
+
+def _bonus_rolagem_criatura(ficha: FichaCriatura, texto: str) -> int:
+    """Calcula o bônus salvo na ficha da criatura para um ataque não mágico."""
+    bonus_registrado = re.search(r"([+-]\s*\d+)\s*$", texto.strip())
+    if bonus_registrado:
+        return int(bonus_registrado.group(1).replace(" ", ""))
+
+    rolagem = texto.strip()
+    if rolagem in ficha.atributos:
+        return modificador(ficha.atributos[rolagem])
+
+    pericia = next(
+        (nome for nome in PERICIAS if rolagem == nome),
+        None,
+    )
+    if pericia is None:
+        correspondencia = re.fullmatch(
+            r"(.+?)\s+com modificador de\s+(.+)", rolagem, re.IGNORECASE
+        )
+        if correspondencia:
+            pericia = next(
+                (nome for nome in PERICIAS if nome.casefold() == correspondencia.group(1).casefold()),
+                None,
+            )
+            atributo = next(
+                (nome for nome in ficha.atributos if nome.casefold() == correspondencia.group(2).casefold()),
+                None,
+            )
+            if pericia and atributo:
+                return ficha.pericias.get(pericia, 0) + modificador(ficha.atributos[atributo])
+    if pericia:
+        return max(bonus_pericia(pericia, ficha.pericias.get(pericia, 0), ficha.atributos))
+    return 0
 
 
 def _tipo_acao_registrado(texto: str) -> str:
@@ -1487,7 +1523,8 @@ class AcoesCombateView(ViewUsuario):
             self.participante_id,
         )
         tem_ataque = any(
-            isinstance(item, discord.ui.Button) and item.label in {"Feitiço", "Arma"}
+            isinstance(item, discord.ui.Button)
+            and item.label in {"Feitiço", "Arma", "Ataque"}
             for item in view.children
         )
         descricao = (
@@ -1679,6 +1716,16 @@ class TipoAtaqueView(ViewUsuario):
             )
             arma.callback = self.arma
             self.add_item(arma)
+        if (
+            not participante.acao_padrao_usada
+            and isinstance(ficha, FichaCriatura)
+            and ficha.ataques
+        ):
+            ataque = discord.ui.Button(
+                label="Ataque", emoji=EMOJI_ATAQUE, style=discord.ButtonStyle.danger
+            )
+            ataque.callback = self.ataque_criatura
+            self.add_item(ataque)
         voltar = discord.ui.Button(
             label="Voltar", style=discord.ButtonStyle.secondary, row=4
         )
@@ -1716,6 +1763,31 @@ class TipoAtaqueView(ViewUsuario):
                 self.combate_id,
                 participante.identificador,
                 armas,
+            ),
+        )
+
+    async def ataque_criatura(self, interaction: discord.Interaction) -> None:
+        combate, _ = self.cog.localizar(self.combate_id)
+        participante = combate.participante(self.participante_id)
+        ficha = _ficha_participante(participante)
+        if not isinstance(ficha, FichaCriatura) or not ficha.ataques:
+            await interaction.response.send_message(
+                "Esta criatura não possui ataques cadastrados.", ephemeral=True
+            )
+            return
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed_painel_combate(
+                f"{EMOJI_ATAQUE} Ataques de {participante.nome}",
+                "Escolha um ataque registrado na ficha da criatura.",
+                participante=participante,
+            ),
+            view=SelecionarAtaqueCriaturaCombateView(
+                self.cog,
+                self.usuario_id,
+                self.combate_id,
+                self.participante_id,
+                ficha.ataques,
             ),
         )
 
@@ -2100,6 +2172,97 @@ class SelecionarArmaCombateView(ViewUsuario):
                 nome=arma.get("nome", "Arma"),
                 bonus=bonus,
                 dano=arma.get("dano", ""),
+            ),
+        )
+
+
+class SelecionarAtaqueCriaturaCombateView(ViewUsuario):
+    def __init__(self, cog, usuario_id, combate_id, participante_id, ataques):
+        super().__init__(usuario_id)
+        self.cog = cog
+        self.combate_id = combate_id
+        self.participante_id = participante_id
+        self.ataques = list(ataques)[:25]
+        seletor = discord.ui.Select(
+            placeholder="Escolha o ataque",
+            options=[
+                discord.SelectOption(
+                    label=ataque.get("nome", "Ataque")[:100],
+                    value=str(indice),
+                    description=(
+                        f"{ataque.get('tipo de ação', 'Ação Padrão')} • "
+                        f"{ataque.get('dano ou efeito', 'Sem dano informado')}"
+                    )[:100],
+                )
+                for indice, ataque in enumerate(self.ataques)
+            ],
+        )
+        seletor.callback = self.selecionar
+        self.seletor = seletor
+        self.add_item(seletor)
+        voltar = discord.ui.Button(
+            label="Voltar", style=discord.ButtonStyle.secondary, row=4
+        )
+        voltar.callback = self.voltar
+        self.add_item(voltar)
+
+    async def voltar(self, interaction: discord.Interaction) -> None:
+        combate, _ = self.cog.localizar(self.combate_id)
+        participante = combate.participante(self.participante_id)
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed_acoes_turno(participante, "Escolha o tipo de ataque."),
+            view=TipoAtaqueView(
+                self.cog, self.usuario_id, self.combate_id, self.participante_id
+            ),
+        )
+
+    async def selecionar(self, interaction: discord.Interaction) -> None:
+        ataque = self.ataques[int(self.seletor.values[0])]
+        combate, _ = self.cog.localizar(self.combate_id)
+        participante = combate.participante(self.participante_id)
+        ficha = _ficha_participante(participante)
+        if not isinstance(ficha, FichaCriatura):
+            await interaction.response.send_message(
+                "Este ataque pertence a uma ficha de criatura.", ephemeral=True
+            )
+            return
+
+        nome = ataque.get("nome", "Ataque")
+        rolagem = ataque.get("rolagem de ataque", "")
+        dano = ataque.get("dano ou efeito", "")
+        embed = discord.Embed(
+            title=f"{EMOJI_ATAQUE} {nome}",
+            description=ataque.get("descrição", "") or None,
+            color=COR_COMBATE,
+        )
+        for rotulo, chave in (
+            ("Ação", "tipo de ação"),
+            ("Rolagem de ataque", "rolagem de ataque"),
+            ("Dano ou efeito", "dano ou efeito"),
+            ("Resistência", "teste de resistência"),
+            ("Duração", "duração"),
+            ("Recarga", "recarga"),
+        ):
+            valor = ataque.get(chave, "").strip()
+            if valor:
+                embed.add_field(name=rotulo, value=valor[:1024], inline=False)
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed,
+            view=ExecutarAtaqueView(
+                self.cog,
+                self.usuario_id,
+                self.combate_id,
+                self.participante_id,
+                tipo="arma",
+                nome=nome,
+                bonus=_bonus_rolagem_criatura(ficha, rolagem),
+                dano=dano,
+                tipo_acao=_tipo_acao_registrado(
+                    ataque.get("tipo de ação", "Padrão")
+                ),
+                recarga=ataque.get("recarga", ""),
             ),
         )
 
