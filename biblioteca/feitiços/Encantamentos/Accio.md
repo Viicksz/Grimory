@@ -21,16 +21,6 @@
   "tipos": [
     "Utilidade"
   ],
-  "efeitos": [
-    {
-      "tipo": "Utilidade",
-      "texto": "Convoca um objeto distante.",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Nenhuma"
   ],

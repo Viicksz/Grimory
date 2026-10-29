@@ -21,7 +21,6 @@
         "Proteção",
         "Controle"
       ],
-      "efeitos": [],
       "respostas": [
         "Vontade",
         "Fortitude",
@@ -87,7 +86,6 @@
       "detalhes_alvo": "",
       "area": "",
       "tipos": [],
-      "efeitos": [],
       "respostas": [],
       "acumulo": "",
       "encerramento": "",
@@ -149,16 +147,6 @@
       "detalhes_alvo": "",
       "area": "",
       "tipos": [],
-      "efeitos": [
-        {
-          "tipo": "Utilidade",
-          "texto": "Convoca um objeto distante.",
-          "alvo": "",
-          "valor": "",
-          "condicao": "",
-          "remocao": ""
-        }
-      ],
       "respostas": [
         "Nenhuma"
       ],
@@ -223,7 +211,6 @@
       "detalhes_alvo": "",
       "area": "",
       "tipos": [],
-      "efeitos": [],
       "respostas": [],
       "acumulo": "",
       "encerramento": "",
@@ -265,5 +252,74 @@
       }
     },
     "descricao": "Projeta um poderoso feitiço de impacto capaz de danificar ou destruir objetos, sendo amplamente utilizado para abrir caminho através de obstáculos ou comprometer equipamentos durante um combate.\n**Além do dano causado ao portador, o objeto atingido perde 1 Ponto de Vida.**"
+  },
+  "Duelos/Accurate Impetum.md": {
+    "perfil": {
+      "versao": 2,
+      "estado": "rascunho",
+      "mira": "Intuição",
+      "detalhes_mira": "",
+      "tipo_acao": "Padrão",
+      "ativacao": "Instantânea",
+      "gatilho": "",
+      "duracao": {
+        "valor": "",
+        "unidade": "Instantâneo"
+      },
+      "alcance": "Médio",
+      "detalhes_alcance": "",
+      "alvo": "Pessoal",
+      "detalhes_alvo": "",
+      "area": "",
+      "tipos": [
+        "Utilidade",
+        "Buff"
+      ],
+      "efeitos": [],
+      "respostas": [
+        "Vontade"
+      ],
+      "acumulo": "Não acumula",
+      "encerramento": "O feitiço é de uso único: seu efeito se resolve imediatamente após a execução e não permanece ativo.",
+      "encerramento_tipo": "Uso único (instantâneo)",
+      "contramagia": "Accurate Impetum",
+      "concentracao": {
+        "exigida": false,
+        "pericia": "Vontade",
+        "cd": "Mesma CD do feitiço",
+        "gatilho": "Sempre que houver uma distração"
+      },
+      "protecao": {
+        "pv": "",
+        "cobertura": "",
+        "reducao": ""
+      },
+      "dano": {
+        "inicial": "",
+        "tipo_inicial": "",
+        "sustentado": "",
+        "tipo_sustentado": "",
+        "frequencia": ""
+      },
+      "cura": {
+        "formula": "",
+        "recurso": "",
+        "frequencia": ""
+      },
+      "defesa": {
+        "momento": "Não é defesa",
+        "ajuste_cd_reacao": 0,
+        "ocasioes": "",
+        "propriedades": []
+      },
+      "contra_feitico": {
+        "habilitado": false,
+        "momento": "",
+        "feiticos": [],
+        "propriedades": [],
+        "resultado": ""
+      }
+    },
+    "descricao": "Ao apontar a varinha para um alvo no alcance, o feitiço concede ao conjurador uma breve leitura intuitiva das defesas, postura e possíveis aberturas do oponente. Essa percepção momentânea permite preparar melhor o próximo ataque, tornando o golpe seguinte mais preciso.\n**No próximo turno, o conjurador recebe vantagem na primeira jogada de ataque contra o alvo.**"
   }
 }

@@ -21,16 +21,6 @@
   "tipos": [
     "Utilidade"
   ],
-  "efeitos": [
-    {
-      "tipo": "Utilidade",
-      "texto": "Cria uma passagem sob a água",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Nenhuma"
   ],

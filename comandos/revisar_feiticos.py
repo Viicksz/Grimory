@@ -274,7 +274,8 @@ def resumo_perfil(sessao: SessaoFeitico) -> discord.Embed:
         value=(
             f"Resposta: **{', '.join(perfil.get('respostas', [])) or '--'}**\n"
             f"Acúmulo: **{perfil.get('acumulo') or '--'}**\n"
-            f"Encerramento: **{perfil.get('encerramento') or '--'}**"
+            f"Encerramento: **{perfil.get('encerramento') or '--'}**\n"
+            f"Contra-feitiço: **{perfil.get('contramagia') or '--'}**"
         )[:1024],
         inline=False,
     )
@@ -440,7 +441,7 @@ class SelecionarFeiticoRevisaoView(ViewPrivada):
         except (OSError, ValueError, json.JSONDecodeError):
             perfil = None
         if perfil and perfil.get("estado") == "completa":
-            return "Revisão completa"
+            return "Revisão completa" if not pendencias(perfil) else "Revisão incompleta"
         return "Rascunho salvo" if rascunho else "Não revisado"
 
     @classmethod
@@ -448,6 +449,7 @@ class SelecionarFeiticoRevisaoView(ViewPrivada):
         situacao = cls._situacao(arquivo)
         indicador = {
             "Revisão completa": "✅ ",
+            "Revisão incompleta": "⚠️ ",
             "Rascunho salvo": "⚠️ ",
         }.get(situacao, "")
         return f"{indicador}{arquivo.stem}"
@@ -501,7 +503,7 @@ class EditorFeiticoView(ViewPrivada):
             ("Duração, alcance e alvo", self.duracao, 0),
             ("Tipos", self.tipos, 0),
             ("Regras universais", self.regras, 1),
-            ("Efeitos", self.efeitos, 1),
+            ("Mecânicas", self.efeitos, 1),
             ("Defesa e contra-feitiço", self.defesa, 1),
             ("Descrição", self.descricao, 2),
             ("Prévia", self.previa, 2),
@@ -924,9 +926,9 @@ class DetalhesDuracaoModal(discord.ui.Modal, title="Duração, alcance e alvo"):
         alvo = sessao.perfil.get("alvo", "")
         self.detalhes_alvo = discord.ui.TextInput(
             label=(
-                "Dimensões e afetados da área"
+                "Dimensões da área (Obrigatório)"
                 if alvo == "Área"
-                else "Restrições ou detalhes do alvo"
+                else "Detalhes do alvo (Obrigatório)"
                 if alvo == "Especial"
                 else "Detalhes (Opcional)"
             ),
@@ -946,7 +948,7 @@ class DetalhesDuracaoModal(discord.ui.Modal, title="Duração, alcance e alvo"):
         itens = [self.valor, self.detalhes_alcance, self.detalhes_alvo]
         if sessao.perfil.get("mira") == "Especial":
             self.detalhes_mira = discord.ui.TextInput(
-                label="Condição especial da manifestação",
+                label="Manifestação especial (Obrigatório)",
                 required=True,
                 placeholder="Ex.: exige conhecer o nome verdadeiro do alvo.",
                 default=sessao.perfil.get("detalhes_mira", ""),
@@ -978,7 +980,7 @@ class GatilhoPreparadoModal(discord.ui.Modal, title="Gatilho da magia preparada"
         super().__init__()
         self.usuario_id, self.sessao = usuario_id, sessao
         self.texto = discord.ui.TextInput(
-            label="Gatilho",
+            label="Gatilho (Obrigatório)",
             style=discord.TextStyle.paragraph,
             default=sessao.perfil.get("gatilho", ""),
             placeholder="Ex.: quando alguém atravessar a porta marcada.",
@@ -1003,7 +1005,7 @@ def resumo_regras_universais(sessao: SessaoFeitico) -> discord.Embed:
             f"Resposta do alvo: **{', '.join(perfil.get('respostas', [])) or '--'}**\n"
             f"Acúmulo: **{perfil.get('acumulo') or '--'}**\n"
             f"Interrupção ou encerramento: **{perfil.get('encerramento') or '--'}**\n\n"
-            "Escolha as opções nos menus. Use o botão apenas para explicar quando o efeito termina."
+            "Escolha a forma de encerramento. Condição específica abre um campo próprio."
         ),
     )
 
@@ -1036,13 +1038,22 @@ class RegrasUniversaisView(ViewPrivada):
         )
         self.acumulo.callback = self.selecionar_acumulo
         self.add_item(self.acumulo)
-        encerramento = discord.ui.Button(
-            label="Interrupção e encerramento",
-            style=discord.ButtonStyle.primary,
+        opcoes_encerramento = (
+            "Uso único (instantâneo)", "Sustentado", "Duração definida",
+            "Preparado", "Até o fim da cena", "Proteção com PV",
+            "Condição específica",
+        )
+        atual = sessao.perfil.get("encerramento_tipo", "")
+        self.encerramento = discord.ui.Select(
+            placeholder="Como o efeito se encerra?",
+            options=[
+                discord.SelectOption(label=opcao, value=opcao, default=opcao == atual)
+                for opcao in opcoes_encerramento
+            ],
             row=2,
         )
-        encerramento.callback = self.editar_encerramento
-        self.add_item(encerramento)
+        self.encerramento.callback = self.selecionar_encerramento
+        self.add_item(self.encerramento)
         confirmar = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.success, row=4)
         confirmar.callback = self.confirmar
         self.add_item(confirmar)
@@ -1066,8 +1077,23 @@ class RegrasUniversaisView(ViewPrivada):
         self.sessao.perfil["acumulo"] = self.acumulo.values[0]
         await self.atualizar(interaction)
 
-    async def editar_encerramento(self, interaction):
-        await interaction.response.send_modal(EncerramentoEfeitoModal(self.usuario_id, self.sessao))
+    async def selecionar_encerramento(self, interaction):
+        tipo = self.encerramento.values[0]
+        if tipo == "Condição específica":
+            await interaction.response.send_modal(CondicaoEncerramentoModal(self.usuario_id, self.sessao))
+            return
+        frases = {
+            "Uso único (instantâneo)": "O feitiço é de uso único: seu efeito se resolve imediatamente após a execução e não permanece ativo.",
+            "Sustentado": "O efeito permanece ativo enquanto for sustentado. Ele se encerra quando o conjurador o desfaz ou perde a concentração.",
+            "Duração definida": "O efeito se encerra quando a duração indicada se esgota.",
+            "Preparado": "A magia permanece preparada até que o gatilho seja ativado ou o conjurador a desfaça.",
+            "Até o fim da cena": "O efeito permanece ativo até o fim da cena, salvo se for desfeito antes por outra condição.",
+            "Proteção com PV": "O efeito se encerra quando sua duração termina, quando o conjurador o desfaz ou quando a proteção perde todos os seus PV.",
+        }
+        self.sessao.perfil["encerramento_tipo"] = tipo
+        self.sessao.perfil["encerramento"] = frases[tipo]
+        self.sessao.salvar_rascunho()
+        await interaction.response.edit_message(embed=resumo_regras_universais(self.sessao), view=RegrasUniversaisView(self.usuario_id, self.sessao))
 
     async def confirmar(self, interaction):
         self.sessao.salvar_rascunho()
@@ -1080,20 +1106,21 @@ class RegrasUniversaisView(ViewPrivada):
         )
 
 
-class EncerramentoEfeitoModal(discord.ui.Modal, title="Interrupção e encerramento"):
+class CondicaoEncerramentoModal(discord.ui.Modal, title="Condição específica de encerramento"):
     def __init__(self, usuario_id, sessao):
         super().__init__()
         self.usuario_id, self.sessao = usuario_id, sessao
         self.texto = discord.ui.TextInput(
-            label="Quando o efeito termina?",
+            label="Condição de encerramento (Obrigatório)",
             style=discord.TextStyle.paragraph,
             default=sessao.perfil.get("encerramento", ""),
-            placeholder="Ex.: ao fim da duração ou quando o alvo passar no teste indicado.",
+            placeholder="Ex.: termina quando o alvo passar em um teste de Fortitude.",
             max_length=800,
         )
         self.add_item(self.texto)
 
     async def on_submit(self, interaction):
+        self.sessao.perfil["encerramento_tipo"] = "Condição específica"
         self.sessao.perfil["encerramento"] = str(self.texto).strip()
         self.sessao.salvar_rascunho()
         await interaction.response.edit_message(
@@ -1104,18 +1131,11 @@ class EncerramentoEfeitoModal(discord.ui.Modal, title="Interrupção e encerrame
 
 def resumo_efeitos(sessao: SessaoFeitico) -> discord.Embed:
     tipos = sessao.perfil.get("tipos", [])
-    efeitos = sessao.perfil.get("efeitos", [])
-    cadastrados = [
-        str(item.get("tipo", "Efeito"))
-        for item in efeitos
-        if isinstance(item, dict) and item.get("texto")
-    ]
     return embed_painel(
-        "Efeitos",
+        "Mecânicas",
         (
             f"Tipos escolhidos: **{', '.join(tipos) or '--'}**\n"
-            f"Efeitos descritivos cadastrados: **{', '.join(cadastrados) or '--'}**\n\n"
-            "Preencha somente os botões exibidos para este feitiço."
+            "Registre apenas os valores mecânicos aplicáveis. A descrição do feitiço já explica seus efeitos."
         ),
     )
 
@@ -1132,16 +1152,8 @@ class EfeitosFeiticoView(ViewPrivada):
             botoes.append(("Cura", self.cura))
         if "Proteção" in tipos:
             botoes.append(("Proteção", self.protecao))
-        for tipo in TIPOS_EFEITO:
-            if tipo not in tipos or tipo in {"Dano", "Cura", "Proteção"}:
-                continue
-
-            async def abrir(interaction, tipo_efeito=tipo):
-                await interaction.response.send_modal(
-                    EfeitoModal(self.usuario_id, self.sessao, tipo_efeito)
-                )
-
-            botoes.append((tipo, abrir))
+        if "Contra-feitiço" in tipos:
+            botoes.append(("Contra-feitiço", self.contra_feitico))
         for indice, (label, callback) in enumerate(botoes):
             botao = discord.ui.Button(
                 label=label,
@@ -1150,10 +1162,6 @@ class EfeitosFeiticoView(ViewPrivada):
             )
             botao.callback = callback
             self.add_item(botao)
-        if sessao.perfil.get("efeitos"):
-            limpar = discord.ui.Button(label="Limpar efeitos", style=discord.ButtonStyle.danger, row=3)
-            limpar.callback = self.limpar
-            self.add_item(limpar)
         confirmar = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.success, row=4)
         confirmar.callback = self.confirmar
         self.add_item(confirmar)
@@ -1164,12 +1172,14 @@ class EfeitosFeiticoView(ViewPrivada):
     async def dano(self, interaction): await interaction.response.send_modal(DanoModal(self.usuario_id, self.sessao))
     async def cura(self, interaction): await interaction.response.send_modal(CuraModal(self.usuario_id, self.sessao))
     async def protecao(self, interaction): await interaction.response.send_modal(ProtecaoModal(self.usuario_id, self.sessao))
-    async def limpar(self, interaction):
-        self.sessao.perfil["efeitos"] = []
-        self.sessao.salvar_rascunho()
+    async def contra_feitico(self, interaction):
+        self.sessao.perfil.setdefault("contra_feitico", {})["habilitado"] = True
         await interaction.response.edit_message(
-            embed=resumo_efeitos(self.sessao),
-            view=EfeitosFeiticoView(self.usuario_id, self.sessao),
+            embed=embed_painel(
+                "Escolher feitiço anulado",
+                "Selecione na biblioteca o feitiço que esta magia consegue anular.",
+            ),
+            view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao, "alvos"),
         )
     async def confirmar(self, interaction):
         self.sessao.salvar_rascunho()
@@ -1195,8 +1205,8 @@ class DanoModal(discord.ui.Modal, title="Dano"):
 class CuraModal(discord.ui.Modal, title="Cura"):
     def __init__(self,usuario_id,sessao):
         super().__init__();self.usuario_id,self.sessao=usuario_id,sessao;cura=sessao.perfil.get("cura",{})
-        self.formula=discord.ui.TextInput(label="Fórmula de cura",default=cura.get("formula",""),placeholder="Ex.: 3d6 + Bônus de Medicina de Cura")
-        self.recurso=discord.ui.TextInput(label="Recurso recuperado",default=cura.get("recurso","vida"),placeholder="Ex.: vida, alma ou PH")
+        self.formula=discord.ui.TextInput(label="Fórmula de cura (Obrigatório)",default=cura.get("formula",""),placeholder="Ex.: 3d6 + Bônus de Medicina de Cura")
+        self.recurso=discord.ui.TextInput(label="Recurso recuperado (Obrigatório)",default=cura.get("recurso","vida"),placeholder="Ex.: vida, alma ou PH")
         self.frequencia=discord.ui.TextInput(label="Frequência (Opcional)",required=False,default=cura.get("frequencia",""),placeholder="Ex.: por turno sustentado")
         for item in (self.formula,self.recurso,self.frequencia):self.add_item(item)
     async def on_submit(self,interaction):
@@ -1208,30 +1218,12 @@ class ProtecaoModal(discord.ui.Modal, title="Proteção"):
     def __init__(self,usuario_id,sessao):
         super().__init__();self.usuario_id,self.sessao=usuario_id,sessao;protecao=sessao.perfil.get("protecao",{})
         self.pv=discord.ui.TextInput(label="PV da proteção (Opcional)",required=False,default=protecao.get("pv",""),placeholder="Ex.: 4")
-        self.cobertura=discord.ui.TextInput(label="O que a proteção cobre?",style=discord.TextStyle.paragraph,default=protecao.get("cobertura",""),placeholder="Ex.: protege contra fogo e impactos físicos.",max_length=800)
+        self.cobertura=discord.ui.TextInput(label="Cobertura da proteção (Obrigatório)",style=discord.TextStyle.paragraph,default=protecao.get("cobertura",""),placeholder="Ex.: protege contra fogo e impactos físicos.",max_length=800)
         self.reducao=discord.ui.TextInput(label="Absorção ou redução (Opcional)",required=False,default=protecao.get("reducao",""),placeholder="Ex.: reduz 2 de dano ígneo.",max_length=300)
         for item in (self.pv,self.cobertura,self.reducao):self.add_item(item)
     async def on_submit(self,interaction):
         self.sessao.perfil["protecao"]={"pv":str(self.pv).strip(),"cobertura":str(self.cobertura).strip(),"reducao":str(self.reducao).strip()}
-        efeitos=[item for item in self.sessao.perfil.setdefault("efeitos",[]) if not isinstance(item,dict) or item.get("tipo")!="Proteção"]
-        if str(self.cobertura).strip():efeitos.append({"tipo":"Proteção","texto":str(self.cobertura).strip()})
-        self.sessao.perfil["efeitos"]=efeitos
         self.sessao.salvar_rascunho();await interaction.response.edit_message(embed=resumo_perfil(self.sessao),view=EditorFeiticoView(self.usuario_id,self.sessao))
-
-
-class EfeitoModal(discord.ui.Modal):
-    def __init__(self, usuario_id, sessao, tipo):
-        super().__init__(title=f"Efeito — {tipo}")
-        self.usuario_id, self.sessao, self.tipo = usuario_id, sessao, tipo
-        self.texto=discord.ui.TextInput(label="O que este efeito faz?",style=discord.TextStyle.paragraph,placeholder="Ex.: o alvo perde 2 metros de deslocamento até o fim da rodada.",max_length=900)
-        self.alvo=discord.ui.TextInput(label="O que ele altera? (Opcional)",required=False,placeholder="Ex.: reflexo, deslocamento ou ação padrão.",max_length=150)
-        self.valor=discord.ui.TextInput(label="Qual é a alteração? (Opcional)",required=False,placeholder="Ex.: +2, -1d4, vantagem ou ação extra.",max_length=100)
-        self.condicao=discord.ui.TextInput(label="Aplica alguma condição? (Opcional)",required=False,placeholder="Ex.: impedido ou atordoado.",max_length=200)
-        self.remocao=discord.ui.TextInput(label="Como o efeito termina? (Opcional)",required=False,placeholder="Ex.: ao fim da duração ou com Finite Incantatem.",max_length=300)
-        for item in (self.texto,self.alvo,self.valor,self.condicao,self.remocao):self.add_item(item)
-    async def on_submit(self,interaction):
-        self.sessao.perfil.setdefault("efeitos",[]).append({"tipo":self.tipo,"texto":str(self.texto).strip(),"alvo":str(self.alvo).strip(),"valor":str(self.valor).strip(),"condicao":str(self.condicao).strip(),"remocao":str(self.remocao).strip()})
-        self.sessao.salvar_rascunho();await interaction.response.edit_message(embed=resumo_efeitos(self.sessao),view=EfeitosFeiticoView(self.usuario_id,self.sessao))
 
 
 def _momento_contra_atual(sessao: SessaoFeitico) -> str:
@@ -1248,6 +1240,115 @@ def _momento_contra_atual(sessao: SessaoFeitico) -> str:
     return momento if momento in MOMENTOS_CONTRA_FEITICO else "Não se aplica"
 
 
+def _grupos_contramagia(categoria: str) -> list[tuple[str, str, list[Path]]]:
+    return grupos_revisao(arquivos_categoria(categoria))
+
+
+class SeletorContramagiaCategoriaView(ViewPrivada):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, destino: str = "propria"):
+        super().__init__(usuario_id)
+        self.sessao, self.destino = sessao, destino
+        categorias = sorted((p.name for p in PASTA_FEITICOS.iterdir() if p.is_dir()), key=str.casefold)
+        seletor = discord.ui.Select(
+            placeholder="Escolha a categoria do contra-feitiço",
+            options=[discord.SelectOption(label=nome[:100], value=nome) for nome in categorias[:25]],
+            row=0,
+        )
+        seletor.callback = self.selecionar
+        self.add_item(seletor)
+        voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
+        voltar.callback = self.voltar
+        self.add_item(voltar)
+
+    async def selecionar(self, interaction):
+        categoria = interaction.data["values"][0]
+        grupos = _grupos_contramagia(categoria)
+        view = SeletorContramagiaGrupoView(self.usuario_id, self.sessao, categoria, self.destino)
+        texto = f"Categoria: **{categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."
+        if not grupos:
+            texto = f"Não há feitiços disponíveis na categoria **{categoria}**."
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", texto), view=view)
+
+    async def voltar(self, interaction):
+        await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
+
+
+class SeletorContramagiaGrupoView(ViewPrivada):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, categoria: str, destino: str = "propria"):
+        super().__init__(usuario_id)
+        self.sessao, self.categoria, self.destino = sessao, categoria, destino
+        self.grupos = _grupos_contramagia(categoria)
+        if self.grupos:
+            seletor = discord.ui.Select(
+                placeholder="Ano de desbloqueio ou subcategoria",
+                options=[discord.SelectOption(label=(rotulo if tipo == "Ano" else f"{tipo}: {rotulo}")[:100], value=str(i)) for i, (tipo, rotulo, _) in enumerate(self.grupos[:25])],
+                row=0,
+            )
+            seletor.callback = self.selecionar
+            self.add_item(seletor)
+        voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
+        voltar.callback = self.voltar
+        self.add_item(voltar)
+
+    async def selecionar(self, interaction):
+        grupo = self.grupos[int(interaction.data["values"][0])]
+        view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, grupo, self.destino)
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"Categoria: **{self.categoria}**\n{grupo[0]}: **{grupo[1]}**\nSelecione o nome na biblioteca."), view=view)
+
+    async def voltar(self, interaction):
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", "Escolha primeiro a categoria."), view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao, self.destino))
+
+
+class SeletorContramagiaFeiticoView(ViewPrivada):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, categoria: str, grupo, destino: str = "propria", pagina: int = 0):
+        super().__init__(usuario_id)
+        self.sessao, self.categoria, self.grupo, self.destino = sessao, categoria, grupo, destino
+        self.paginas = [grupo[2][i:i + LIMITE_SELETOR] for i in range(0, len(grupo[2]), LIMITE_SELETOR)] or [[]]
+        self.pagina = max(0, min(pagina, len(self.paginas) - 1))
+        arquivos = self.paginas[self.pagina]
+        if arquivos:
+            seletor = discord.ui.Select(
+                placeholder="Escolha o contra-feitiço",
+                options=[discord.SelectOption(label=arquivo.stem[:100], value=arquivo.name) for arquivo in arquivos],
+                row=0,
+            )
+            seletor.callback = self.selecionar
+            self.add_item(seletor)
+        if len(self.paginas) > 1:
+            anterior = discord.ui.Button(label="Anterior", style=discord.ButtonStyle.secondary, disabled=self.pagina == 0, row=2)
+            anterior.callback = self.pagina_anterior
+            self.add_item(anterior)
+            proxima = discord.ui.Button(label="Próxima", style=discord.ButtonStyle.secondary, disabled=self.pagina == len(self.paginas) - 1, row=2)
+            proxima.callback = self.proxima_pagina
+            self.add_item(proxima)
+        voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
+        voltar.callback = self.voltar
+        self.add_item(voltar)
+
+    async def selecionar(self, interaction):
+        nome_arquivo = interaction.data["values"][0]
+        arquivo = next(p for p in self.grupo[2] if p.name == nome_arquivo)
+        if self.destino == "propria":
+            self.sessao.perfil["contramagia"] = arquivo.stem
+        else:
+            self.sessao.perfil.setdefault("contra_feitico", {}).update({"habilitado": True, "feiticos": [arquivo.stem]})
+        self.sessao.salvar_rascunho()
+        await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
+
+    async def pagina_anterior(self, interaction):
+        await self._trocar_pagina(interaction, self.pagina - 1)
+
+    async def proxima_pagina(self, interaction):
+        await self._trocar_pagina(interaction, self.pagina + 1)
+
+    async def _trocar_pagina(self, interaction, pagina):
+        view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, self.grupo, self.destino, pagina)
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{self.categoria} — {self.grupo[1]} — página {pagina + 1}/{len(view.paginas)}"), view=view)
+
+    async def voltar(self, interaction):
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"Categoria: **{self.categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."), view=SeletorContramagiaGrupoView(self.usuario_id, self.sessao, self.categoria, self.destino))
+
+
 def resumo_defesa_contra(sessao: SessaoFeitico) -> discord.Embed:
     defesa = sessao.perfil.get("defesa", {})
     contra = sessao.perfil.get("contra_feitico", {})
@@ -1256,9 +1357,10 @@ def resumo_defesa_contra(sessao: SessaoFeitico) -> discord.Embed:
         (
             f"Uso defensivo: **{defesa.get('momento') or 'Não é defesa'}**\n"
             f"Uso como contra-feitiço: **{_momento_contra_atual(sessao)}**\n"
+            f"Contra-feitiço deste feitiço: **{sessao.perfil.get('contramagia') or '--'}**\n"
             f"Protege contra: **{', '.join(defesa.get('propriedades', [])) or '--'}**\n"
             f"Feitiços combatidos: **{', '.join(contra.get('feiticos', [])) or '--'}**\n\n"
-            "Escolha os momentos nos menus. Os botões de detalhes aparecem somente quando se aplicam."
+            "Escolha os momentos nos menus. Selecione os nomes dos feitiços diretamente na biblioteca."
         ),
     )
 
@@ -1294,10 +1396,17 @@ class DefesaContraView(ViewPrivada):
             detalhes_defesa = discord.ui.Button(label="Detalhes da defesa", style=discord.ButtonStyle.primary, row=2)
             detalhes_defesa.callback = self.detalhes_defesa
             self.add_item(detalhes_defesa)
+        escolher_contramagia = discord.ui.Button(label="Contra-feitiço deste feitiço", style=discord.ButtonStyle.primary, row=3)
+        escolher_contramagia.callback = self.escolher_contramagia
+        self.add_item(escolher_contramagia)
+        if sessao.perfil.get("contramagia"):
+            limpar_contramagia = discord.ui.Button(label="Limpar contra-feitiço", style=discord.ButtonStyle.danger, row=3)
+            limpar_contramagia.callback = self.limpar_contramagia
+            self.add_item(limpar_contramagia)
         if contra_atual != "Não se aplica":
-            detalhes_contra = discord.ui.Button(label="Detalhes do contra-feitiço", style=discord.ButtonStyle.primary, row=2)
-            detalhes_contra.callback = self.detalhes_contra
-            self.add_item(detalhes_contra)
+            escolher_alvos = discord.ui.Button(label="Feitiços que ele anula", style=discord.ButtonStyle.primary, row=3)
+            escolher_alvos.callback = self.escolher_alvos
+            self.add_item(escolher_alvos)
         confirmar = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.success, row=4)
         confirmar.callback = self.confirmar
         self.add_item(confirmar)
@@ -1321,13 +1430,28 @@ class DefesaContraView(ViewPrivada):
         contra = self.sessao.perfil.setdefault("contra_feitico", {})
         contra["habilitado"] = momento != "Não se aplica"
         contra["momento"] = "" if momento == "Não se aplica" else momento
+        if momento == "Não se aplica":
+            contra["feiticos"] = []
         await self.atualizar(interaction)
 
     async def detalhes_defesa(self, interaction):
         await interaction.response.send_modal(DetalhesDefesaModal(self.usuario_id, self.sessao))
 
-    async def detalhes_contra(self, interaction):
-        await interaction.response.send_modal(DetalhesContraFeiticoModal(self.usuario_id, self.sessao))
+    async def escolher_contramagia(self, interaction):
+        await interaction.response.edit_message(
+            embed=embed_painel("Escolher contra-feitiço", "Selecione uma categoria da biblioteca."),
+            view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao),
+        )
+
+    async def escolher_alvos(self, interaction):
+        await interaction.response.edit_message(
+            embed=embed_painel("Escolher feitiço anulado", "Selecione na biblioteca o feitiço que esta magia consegue anular."),
+            view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao, "alvos"),
+        )
+
+    async def limpar_contramagia(self, interaction):
+        self.sessao.perfil["contramagia"] = ""
+        await self.atualizar(interaction)
 
     async def confirmar(self, interaction):
         self.sessao.salvar_rascunho()
@@ -1346,7 +1470,7 @@ class DetalhesDefesaModal(discord.ui.Modal, title="Detalhes da defesa"):
         self.usuario_id, self.sessao = usuario_id, sessao
         defesa = sessao.perfil.get("defesa", {})
         self.ocasioes = discord.ui.TextInput(
-            label="Contra quais ataques funciona?",
+            label="Ataques que bloqueia (Obrigatório)",
             style=discord.TextStyle.paragraph,
             default=", ".join(defesa.get("propriedades", [])) or defesa.get("ocasioes", ""),
             placeholder="Ex.: lampejos, fogo ou dano corpóreo.",
@@ -1372,35 +1496,10 @@ class DetalhesDefesaModal(discord.ui.Modal, title="Detalhes da defesa"):
         await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao),view=DefesaContraView(self.usuario_id,self.sessao))
 
 
-class DetalhesContraFeiticoModal(discord.ui.Modal, title="Detalhes do contra-feitiço"):
-    def __init__(self, usuario_id, sessao):
-        super().__init__()
-        self.usuario_id, self.sessao = usuario_id, sessao
-        contra = sessao.perfil.get("contra_feitico", {})
-        self.contras=discord.ui.TextInput(label="Quais feitiços específicos? (Opcional)",required=False,default=", ".join(contra.get("feiticos",[])),placeholder="Ex.: Expelliarmus, Incendio.",max_length=700)
-        self.propriedades=discord.ui.TextInput(label="Ou quais propriedades? (Opcional)",required=False,style=discord.TextStyle.paragraph,default=", ".join(contra.get("propriedades",[])),placeholder="Ex.: fogo, transfiguração ou lampejo.",max_length=700)
-        self.resultado=discord.ui.TextInput(label="O que acontece quando funciona?",style=discord.TextStyle.paragraph,default=contra.get("resultado",""),placeholder="Ex.: dissipa o lampejo antes do impacto.",max_length=700)
-        for item in (self.contras,self.propriedades,self.resultado):self.add_item(item)
-
-    async def on_submit(self,interaction):
-        feiticos=[item.strip() for item in str(self.contras).split(",") if item.strip()]
-        nomes_oficiais={arquivo.stem.casefold():arquivo.stem for arquivo in PASTA_FEITICOS.rglob("*.md")}
-        desconhecidos=[nome for nome in feiticos if nome.casefold() not in nomes_oficiais]
-        if desconhecidos:
-            await interaction.response.send_message(
-                "Não encontrei estas fichas na biblioteca: " + ", ".join(desconhecidos),
-                ephemeral=True,
-            );return
-        feiticos=[nomes_oficiais[nome.casefold()] for nome in feiticos]
-        propriedades=[item.strip() for item in str(self.propriedades).split(",") if item.strip()]
-        self.sessao.perfil["contra_feitico"].update({"habilitado":True,"feiticos":feiticos,"propriedades":propriedades,"resultado":str(self.resultado).strip()})
-        self.sessao.salvar_rascunho();await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao),view=DefesaContraView(self.usuario_id,self.sessao))
-
-
 class DescricaoFeiticoModal(discord.ui.Modal, title="Descrição"):
     def __init__(self,usuario_id,sessao):
         super().__init__();self.usuario_id,self.sessao=usuario_id,sessao
-        self.texto=discord.ui.TextInput(label="Descrição sem as linhas mecânicas",style=discord.TextStyle.paragraph,default=sessao.descricao,placeholder="Ex.: uma descrição narrativa do feitiço, sem dano, duração ou regras.",max_length=4000)
+        self.texto=discord.ui.TextInput(label="Descrição narrativa (Obrigatório)",style=discord.TextStyle.paragraph,default=sessao.descricao,placeholder="Ex.: uma descrição narrativa do feitiço, sem dano, duração ou regras.",max_length=4000)
         self.add_item(self.texto)
     async def on_submit(self,interaction):
         self.sessao.descricao=str(self.texto).strip();self.sessao.salvar_rascunho();await interaction.response.edit_message(embed=resumo_perfil(self.sessao),view=EditorFeiticoView(self.usuario_id,self.sessao))

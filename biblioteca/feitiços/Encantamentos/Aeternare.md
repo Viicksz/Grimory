@@ -21,16 +21,6 @@
   "tipos": [
     "Utilidade"
   ],
-  "efeitos": [
-    {
-      "tipo": "Utilidade",
-      "texto": "Designa a dois objetos um sistema de monitoramento.",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Nenhuma"
   ],

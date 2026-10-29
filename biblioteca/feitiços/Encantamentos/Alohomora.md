@@ -21,16 +21,6 @@
   "tipos": [
     "Utilidade"
   ],
-  "efeitos": [
-    {
-      "tipo": "Utilidade",
-      "texto": "Destranca magicamente fechaduras, cadeados, trancas e outros mecanismos de bloqueio convencionais.",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Nenhuma"
   ],

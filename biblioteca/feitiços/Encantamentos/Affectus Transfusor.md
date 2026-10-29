@@ -22,16 +22,6 @@
     "Utilidade",
     "Controle"
   ],
-  "efeitos": [
-    {
-      "tipo": "Utilidade",
-      "texto": "Permite a um terceiro experienciar seus sentimentos e emoções",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Vontade",
     "Contra-feitiço"

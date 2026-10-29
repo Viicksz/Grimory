@@ -21,16 +21,6 @@
   "tipos": [
     "Utilidade"
   ],
-  "efeitos": [
-    {
-      "tipo": "Utilidade",
-      "texto": "Abre magicamente recipientes, compartimentos e objetos fechados.",
-      "alvo": "",
-      "valor": "",
-      "condicao": "",
-      "remocao": ""
-    }
-  ],
   "respostas": [
     "Nenhuma"
   ],
