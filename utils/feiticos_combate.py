@@ -158,10 +158,11 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
             "gatilho": "Sempre que houver uma distração",
         }
     )
-    # A resposta é uma escolha do mestre.  Esquiva/Reflexo podem ser
-    # sugeridos pela interface, mas nunca devem ser inseridos ou removidos
-    # automaticamente conforme a forma de manifestação.
+    # Esquiva e Reflexo permanecem escolhas do mestre. Um contra-feitiço
+    # catalogado, porém, também habilita automaticamente essa resposta.
     respostas = [item for item in perfil.get("respostas", []) if item in RESPOSTAS]
+    if perfil.get("contramagia") and "Contra-feitiço" not in respostas:
+        respostas.append("Contra-feitiço")
     if len(respostas) > 1:
         respostas = [item for item in respostas if item != "Nenhuma"]
     perfil["respostas"] = respostas
@@ -388,7 +389,7 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         ("tipo_acao", "tipo de ação"),
         ("ativacao", "ativação"),
         ("tipos", "tipo de efeito"),
-        ("respostas", "resistência ou reação"),
+        ("respostas", "resposta do alvo"),
         ("acumulo", "acúmulo"),
         ("encerramento", "interrupção ou encerramento"),
         ("contramagia", "contra-feitiço deste feitiço"),
