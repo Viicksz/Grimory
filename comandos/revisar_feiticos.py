@@ -275,7 +275,7 @@ def resumo_perfil(sessao: SessaoFeitico) -> discord.Embed:
             f"Resposta: **{', '.join(perfil.get('respostas', [])) or '--'}**\n"
             f"Acúmulo: **{perfil.get('acumulo') or '--'}**\n"
             f"Encerramento: **{perfil.get('encerramento') or '--'}**\n"
-            f"Contra-feitiço: **{perfil.get('contramagia') or '--'}**"
+            f"Contra-feitiço: **{', '.join(perfil.get('contramagia', [])) or '--'}**"
         )[:1024],
         inline=False,
     )
@@ -1244,10 +1244,84 @@ def _grupos_contramagia(categoria: str) -> list[tuple[str, str, list[Path]]]:
     return grupos_revisao(arquivos_categoria(categoria))
 
 
+@dataclass
+class EstadoSelecaoContramagia:
+    destino: str
+    nomes: list[str]
+    originais: list[str]
+    referencias: dict[str, list[str]] | None = None
+
+
+def _nomes_contramagia(perfil: dict[str, Any], destino: str) -> list[str]:
+    if destino == "propria":
+        nomes = perfil.get("contramagia", [])
+    else:
+        contra = perfil.get("contra_feitico") or {}
+        nomes = contra.get("feiticos", []) if isinstance(contra, dict) else []
+    if isinstance(nomes, str):
+        nomes = [nomes] if nomes.strip() else []
+    return list(dict.fromkeys(str(nome).strip() for nome in nomes if str(nome).strip()))
+
+
+def _estado_selecao_contramagia(
+    sessao: SessaoFeitico,
+    estado: EstadoSelecaoContramagia | None,
+    destino: str,
+) -> str:
+    defesa = sessao.perfil.get("defesa") or {}
+    defesa_atual = defesa.get("momento") or "Não é defesa"
+    if estado is not None:
+        nomes = estado.nomes
+        pendente = nomes != estado.originais
+    else:
+        nomes = _nomes_contramagia(sessao.perfil, destino)
+        pendente = False
+    contra_atual = ", ".join(nomes) or "--"
+    if pendente:
+        contra_atual += " (pendente)"
+    return f"**Defesa:** {defesa_atual}\n**Contra-feitiço:** {contra_atual}"
+
+
+def _referencias_contramagia() -> dict[str, list[str]]:
+    referencias: dict[str, set[str]] = {}
+
+    def registrar(nome_ficha: str, perfil: dict[str, Any]) -> None:
+        for nome_contra in _nomes_contramagia(perfil, "propria"):
+            if nome_contra.casefold() != nome_ficha.casefold():
+                referencias.setdefault(nome_contra.casefold(), set()).add(nome_ficha)
+
+    for arquivo in PASTA_FEITICOS.rglob("*.md"):
+        try:
+            perfil = extrair_perfil(arquivo.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if perfil:
+            registrar(arquivo.stem, perfil)
+
+    for chave, rascunho in _ler_json(ARQUIVO_RASCUNHOS).items():
+        if not isinstance(rascunho, dict) or not isinstance(rascunho.get("perfil"), dict):
+            continue
+        registrar(Path(chave).stem, normalizar_perfil(rascunho["perfil"]))
+    return {chave: sorted(nomes, key=str.casefold) for chave, nomes in referencias.items()}
+
+
+def _confirmar_selecao_contramagia(sessao: SessaoFeitico, estado: EstadoSelecaoContramagia) -> None:
+    if estado.destino == "propria":
+        sessao.perfil["contramagia"] = list(estado.nomes)
+    else:
+        contra = sessao.perfil.setdefault("contra_feitico", {})
+        contra["habilitado"] = True
+        contra["feiticos"] = list(estado.nomes)
+    sessao.salvar_rascunho()
+
+
 class SeletorContramagiaCategoriaView(ViewPrivada):
-    def __init__(self, usuario_id: int, sessao: SessaoFeitico, destino: str = "propria"):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, destino: str = "propria", estado: EstadoSelecaoContramagia | None = None):
         super().__init__(usuario_id)
         self.sessao, self.destino = sessao, destino
+        self.estado = estado or EstadoSelecaoContramagia(
+            destino, _nomes_contramagia(sessao.perfil, destino), _nomes_contramagia(sessao.perfil, destino)
+        )
         categorias = sorted((p.name for p in PASTA_FEITICOS.iterdir() if p.is_dir()), key=str.casefold)
         seletor = discord.ui.Select(
             placeholder="Escolha a categoria do contra-feitiço",
@@ -1256,6 +1330,9 @@ class SeletorContramagiaCategoriaView(ViewPrivada):
         )
         seletor.callback = self.selecionar
         self.add_item(seletor)
+        confirmar = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.success, row=3)
+        confirmar.callback = self.confirmar
+        self.add_item(confirmar)
         voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
         voltar.callback = self.voltar
         self.add_item(voltar)
@@ -1263,8 +1340,8 @@ class SeletorContramagiaCategoriaView(ViewPrivada):
     async def selecionar(self, interaction):
         categoria = interaction.data["values"][0]
         grupos = _grupos_contramagia(categoria)
-        view = SeletorContramagiaGrupoView(self.usuario_id, self.sessao, categoria, self.destino)
-        texto = f"Categoria: **{categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."
+        view = SeletorContramagiaGrupoView(self.usuario_id, self.sessao, categoria, self.destino, self.estado)
+        texto = f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\nCategoria: **{categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."
         if not grupos:
             texto = f"Não há feitiços disponíveis na categoria **{categoria}**."
         await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", texto), view=view)
@@ -1272,11 +1349,18 @@ class SeletorContramagiaCategoriaView(ViewPrivada):
     async def voltar(self, interaction):
         await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
 
+    async def confirmar(self, interaction):
+        _confirmar_selecao_contramagia(self.sessao, self.estado)
+        await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
+
 
 class SeletorContramagiaGrupoView(ViewPrivada):
-    def __init__(self, usuario_id: int, sessao: SessaoFeitico, categoria: str, destino: str = "propria"):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, categoria: str, destino: str = "propria", estado: EstadoSelecaoContramagia | None = None):
         super().__init__(usuario_id)
         self.sessao, self.categoria, self.destino = sessao, categoria, destino
+        self.estado = estado or EstadoSelecaoContramagia(
+            destino, _nomes_contramagia(sessao.perfil, destino), _nomes_contramagia(sessao.perfil, destino)
+        )
         self.grupos = _grupos_contramagia(categoria)
         if self.grupos:
             seletor = discord.ui.Select(
@@ -1289,27 +1373,53 @@ class SeletorContramagiaGrupoView(ViewPrivada):
         voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
         voltar.callback = self.voltar
         self.add_item(voltar)
+        confirmar = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.success, row=3)
+        confirmar.callback = self.confirmar
+        self.add_item(confirmar)
 
     async def selecionar(self, interaction):
         grupo = self.grupos[int(interaction.data["values"][0])]
-        view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, grupo, self.destino)
-        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"Categoria: **{self.categoria}**\n{grupo[0]}: **{grupo[1]}**\nSelecione o nome na biblioteca."), view=view)
+        view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, grupo, self.destino, estado=self.estado)
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\nCategoria: **{self.categoria}**\n{grupo[0]}: **{grupo[1]}**\nSelecione um ou mais feitiços."), view=view)
 
     async def voltar(self, interaction):
-        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", "Escolha primeiro a categoria."), view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao, self.destino))
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", "Escolha primeiro a categoria."), view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao, self.destino, self.estado))
+
+    async def confirmar(self, interaction):
+        _confirmar_selecao_contramagia(self.sessao, self.estado)
+        await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
 
 
 class SeletorContramagiaFeiticoView(ViewPrivada):
-    def __init__(self, usuario_id: int, sessao: SessaoFeitico, categoria: str, grupo, destino: str = "propria", pagina: int = 0):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, categoria: str, grupo, destino: str = "propria", pagina: int = 0, estado: EstadoSelecaoContramagia | None = None):
         super().__init__(usuario_id)
         self.sessao, self.categoria, self.grupo, self.destino = sessao, categoria, grupo, destino
+        self.estado = estado or EstadoSelecaoContramagia(
+            destino, _nomes_contramagia(sessao.perfil, destino), _nomes_contramagia(sessao.perfil, destino)
+        )
         self.paginas = [grupo[2][i:i + LIMITE_SELETOR] for i in range(0, len(grupo[2]), LIMITE_SELETOR)] or [[]]
         self.pagina = max(0, min(pagina, len(self.paginas) - 1))
         arquivos = self.paginas[self.pagina]
+        if self.estado.referencias is None:
+            self.estado.referencias = _referencias_contramagia()
+        referencias = self.estado.referencias
         if arquivos:
             seletor = discord.ui.Select(
-                placeholder="Escolha o contra-feitiço",
-                options=[discord.SelectOption(label=arquivo.stem[:100], value=arquivo.name) for arquivo in arquivos],
+                placeholder="Selecione um ou mais feitiços",
+                min_values=0,
+                max_values=len(arquivos),
+                options=[
+                    discord.SelectOption(
+                        label=arquivo.stem[:100],
+                        value=arquivo.stem,
+                        description=(
+                            "Já é contra-feitiço de: "
+                            + ", ".join(referencias.get(arquivo.stem.casefold(), []))
+                        )[:100] or None,
+                        default=arquivo.stem in self.estado.nomes,
+                    )
+                    for arquivo in arquivos
+                ],
                 row=0,
             )
             seletor.callback = self.selecionar
@@ -1324,16 +1434,30 @@ class SeletorContramagiaFeiticoView(ViewPrivada):
         voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
         voltar.callback = self.voltar
         self.add_item(voltar)
+        confirmar = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.success, row=3)
+        confirmar.callback = self.confirmar
+        self.add_item(confirmar)
 
     async def selecionar(self, interaction):
-        nome_arquivo = interaction.data["values"][0]
-        arquivo = next(p for p in self.grupo[2] if p.name == nome_arquivo)
-        if self.destino == "propria":
-            self.sessao.perfil["contramagia"] = arquivo.stem
-        else:
-            self.sessao.perfil.setdefault("contra_feitico", {}).update({"habilitado": True, "feiticos": [arquivo.stem]})
-        self.sessao.salvar_rascunho()
-        await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
+        valores = set(interaction.data.get("values", []))
+        escopo = {arquivo.stem for arquivo in self.paginas[self.pagina]}
+        self.estado.nomes = [
+            nome for nome in self.estado.nomes if nome not in escopo
+        ] + [arquivo.stem for arquivo in self.paginas[self.pagina] if arquivo.stem in valores]
+        view = SeletorContramagiaFeiticoView(
+            self.usuario_id, self.sessao, self.categoria, self.grupo, self.destino,
+            self.pagina, self.estado,
+        )
+        referencias = self.estado.referencias or {}
+        avisos = [
+            f"{nome}: já é contra-feitiço de {', '.join(referencias[nome.casefold()])}."
+            for nome in self.estado.nomes
+            if nome.casefold() in referencias
+        ]
+        texto = f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\n{self.categoria} — {self.grupo[1]} — página {self.pagina + 1}/{len(self.paginas)}"
+        if avisos:
+            texto += "\n\n**Vínculos existentes:**\n" + "\n".join(avisos)
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", texto), view=view)
 
     async def pagina_anterior(self, interaction):
         await self._trocar_pagina(interaction, self.pagina - 1)
@@ -1342,24 +1466,28 @@ class SeletorContramagiaFeiticoView(ViewPrivada):
         await self._trocar_pagina(interaction, self.pagina + 1)
 
     async def _trocar_pagina(self, interaction, pagina):
-        view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, self.grupo, self.destino, pagina)
-        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{self.categoria} — {self.grupo[1]} — página {pagina + 1}/{len(view.paginas)}"), view=view)
+        view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, self.grupo, self.destino, pagina, self.estado)
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\n{self.categoria} — {self.grupo[1]} — página {pagina + 1}/{len(view.paginas)}"), view=view)
 
     async def voltar(self, interaction):
-        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"Categoria: **{self.categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."), view=SeletorContramagiaGrupoView(self.usuario_id, self.sessao, self.categoria, self.destino))
+        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\nCategoria: **{self.categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."), view=SeletorContramagiaGrupoView(self.usuario_id, self.sessao, self.categoria, self.destino, self.estado))
+
+    async def confirmar(self, interaction):
+        _confirmar_selecao_contramagia(self.sessao, self.estado)
+        await interaction.response.edit_message(embed=resumo_defesa_contra(self.sessao), view=DefesaContraView(self.usuario_id, self.sessao))
 
 
 def resumo_defesa_contra(sessao: SessaoFeitico) -> discord.Embed:
-    defesa = sessao.perfil.get("defesa", {})
+    defesa = sessao.perfil.get("defesa") or {}
     contra = sessao.perfil.get("contra_feitico", {})
+    nomes_contramagia = _nomes_contramagia(sessao.perfil, "propria")
     return embed_painel(
         "Defesa e contra-feitiço",
         (
-            f"Uso defensivo: **{defesa.get('momento') or 'Não é defesa'}**\n"
-            f"Uso como contra-feitiço: **{_momento_contra_atual(sessao)}**\n"
-            f"Contra-feitiço deste feitiço: **{sessao.perfil.get('contramagia') or '--'}**\n"
-            f"Protege contra: **{', '.join(defesa.get('propriedades', [])) or '--'}**\n"
-            f"Feitiços combatidos: **{', '.join(contra.get('feiticos', [])) or '--'}**\n\n"
+            f"Defesa: **{defesa.get('momento') or 'Não é defesa'}** — {', '.join(defesa.get('propriedades', [])) or 'sem propriedades específicas'}\n"
+            f"Contra-feitiço: **{', '.join(nomes_contramagia) or '--'}**\n"
+            f"Este feitiço anula: **{', '.join(contra.get('feiticos', [])) or '--'}**\n"
+            f"Modo de uso como contra-feitiço: **{_momento_contra_atual(sessao)}**\n\n"
             "Escolha os momentos nos menus. Selecione os nomes dos feitiços diretamente na biblioteca."
         ),
     )
@@ -1399,7 +1527,7 @@ class DefesaContraView(ViewPrivada):
         escolher_contramagia = discord.ui.Button(label="Contra-feitiço deste feitiço", style=discord.ButtonStyle.primary, row=3)
         escolher_contramagia.callback = self.escolher_contramagia
         self.add_item(escolher_contramagia)
-        if sessao.perfil.get("contramagia"):
+        if _nomes_contramagia(sessao.perfil, "propria"):
             limpar_contramagia = discord.ui.Button(label="Limpar contra-feitiço", style=discord.ButtonStyle.danger, row=3)
             limpar_contramagia.callback = self.limpar_contramagia
             self.add_item(limpar_contramagia)
@@ -1439,19 +1567,30 @@ class DefesaContraView(ViewPrivada):
 
     async def escolher_contramagia(self, interaction):
         await interaction.response.edit_message(
-            embed=embed_painel("Escolher contra-feitiço", "Selecione uma categoria da biblioteca."),
+            embed=embed_painel(
+                "Escolher contra-feitiço",
+                f"{_estado_selecao_contramagia(self.sessao, None, 'propria')}\nSelecione uma categoria da biblioteca.",
+            ),
             view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao),
         )
 
     async def escolher_alvos(self, interaction):
         await interaction.response.edit_message(
-            embed=embed_painel("Escolher feitiço anulado", "Selecione na biblioteca o feitiço que esta magia consegue anular."),
+            embed=embed_painel(
+                "Escolher feitiço anulado",
+                f"{_estado_selecao_contramagia(self.sessao, None, 'alvos')}\nSelecione na biblioteca os feitiços que esta magia consegue anular.",
+            ),
             view=SeletorContramagiaCategoriaView(self.usuario_id, self.sessao, "alvos"),
         )
 
     async def limpar_contramagia(self, interaction):
-        self.sessao.perfil["contramagia"] = ""
-        await self.atualizar(interaction)
+        await interaction.response.edit_message(
+            embed=embed_painel(
+                "Limpar contra-feitiço",
+                f"{_estado_selecao_contramagia(self.sessao, None, 'propria')}\nSelecione qual vínculo deseja remover.",
+            ),
+            view=LimparContramagiasView(self.usuario_id, self.sessao),
+        )
 
     async def confirmar(self, interaction):
         self.sessao.salvar_rascunho()
@@ -1461,6 +1600,98 @@ class DefesaContraView(ViewPrivada):
         await interaction.response.edit_message(
             embed=resumo_perfil(self.sessao),
             view=EditorFeiticoView(self.usuario_id, self.sessao),
+        )
+
+
+class LimparContramagiasView(ViewPrivada):
+    def __init__(self, usuario_id: int, sessao: SessaoFeitico, selecionados: list[str] | None = None, pagina: int = 0):
+        super().__init__(usuario_id)
+        self.sessao = sessao
+        self.selecionados = list(selecionados or [])
+        existentes = _nomes_contramagia(sessao.perfil, "propria")
+        self.paginas = [existentes[i:i + LIMITE_SELETOR] for i in range(0, len(existentes), LIMITE_SELETOR)] or [[]]
+        self.pagina = max(0, min(pagina, len(self.paginas) - 1))
+        opcoes = self.paginas[self.pagina]
+        seletor = discord.ui.Select(
+            placeholder="Selecione os vínculos para remover",
+            min_values=0,
+            max_values=len(opcoes),
+            options=[
+                discord.SelectOption(label=nome[:100], value=nome, default=nome in self.selecionados)
+                for nome in opcoes
+            ],
+            row=0,
+        )
+        seletor.callback = self.selecionar
+        self.add_item(seletor)
+        if len(self.paginas) > 1:
+            anterior = discord.ui.Button(label="Anterior", style=discord.ButtonStyle.secondary, disabled=self.pagina == 0, row=2)
+            anterior.callback = self.pagina_anterior
+            self.add_item(anterior)
+            proxima = discord.ui.Button(label="Próxima", style=discord.ButtonStyle.secondary, disabled=self.pagina == len(self.paginas) - 1, row=2)
+            proxima.callback = self.proxima_pagina
+            self.add_item(proxima)
+        confirmar = discord.ui.Button(label="Confirmar limpeza", style=discord.ButtonStyle.danger, disabled=not self.selecionados, row=3)
+        confirmar.callback = self.confirmar
+        self.add_item(confirmar)
+        voltar = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, row=4)
+        voltar.callback = self.voltar
+        self.add_item(voltar)
+
+    def resumo_status(self) -> str:
+        defesa = self.sessao.perfil.get("defesa", {})
+        atuais = _nomes_contramagia(self.sessao.perfil, "propria")
+        restantes = [nome for nome in atuais if nome not in set(self.selecionados)]
+        texto_contra = ", ".join(restantes) or "--"
+        if self.selecionados:
+            texto_contra += " (pendente)"
+        return f"**Defesa:** {defesa.get('momento') or 'Não é defesa'}\n**Contra-feitiço:** {texto_contra}"
+
+    async def selecionar(self, interaction):
+        escopo = set(self.paginas[self.pagina])
+        valores = set(interaction.data.get("values", []))
+        self.selecionados = [nome for nome in self.selecionados if nome not in escopo]
+        self.selecionados.extend(nome for nome in self.paginas[self.pagina] if nome in valores)
+        texto = (
+            f"{self.resumo_status()}\n"
+            f"Remover: **{', '.join(self.selecionados) or '--'}**"
+        )
+        await interaction.response.edit_message(
+            embed=embed_painel("Limpar contra-feitiço", texto),
+            view=LimparContramagiasView(self.usuario_id, self.sessao, self.selecionados, self.pagina),
+        )
+
+    async def pagina_anterior(self, interaction):
+        await self.ir_para_pagina(interaction, self.pagina - 1)
+
+    async def proxima_pagina(self, interaction):
+        await self.ir_para_pagina(interaction, self.pagina + 1)
+
+    async def ir_para_pagina(self, interaction, pagina):
+        view = LimparContramagiasView(self.usuario_id, self.sessao, self.selecionados, pagina)
+        texto = (
+            f"{view.resumo_status()}\n"
+            f"Remover: **{', '.join(self.selecionados) or '--'}**\n"
+            f"Página {view.pagina + 1}/{len(view.paginas)}."
+        )
+        await interaction.response.edit_message(embed=embed_painel("Limpar contra-feitiço", texto), view=view)
+
+    async def confirmar(self, interaction):
+        removidos = set(self.selecionados)
+        self.sessao.perfil["contramagia"] = [
+            nome for nome in _nomes_contramagia(self.sessao.perfil, "propria")
+            if nome not in removidos
+        ]
+        self.sessao.salvar_rascunho()
+        await interaction.response.edit_message(
+            embed=resumo_defesa_contra(self.sessao),
+            view=DefesaContraView(self.usuario_id, self.sessao),
+        )
+
+    async def voltar(self, interaction):
+        await interaction.response.edit_message(
+            embed=resumo_defesa_contra(self.sessao),
+            view=DefesaContraView(self.usuario_id, self.sessao),
         )
 
 

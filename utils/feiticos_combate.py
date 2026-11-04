@@ -75,7 +75,7 @@ def perfil_vazio() -> dict[str, Any]:
         "acumulo": "",
         "encerramento": "",
         "encerramento_tipo": "",
-        "contramagia": "",
+        "contramagia": [],
         "concentracao": {
             "exigida": False,
             "pericia": "Vontade",
@@ -119,6 +119,14 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
     perfil["versao"] = 2
     # Descrições narrativas de efeitos duplicam a descrição principal do feitiço.
     perfil.pop("efeitos", None)
+    contramagias = perfil.get("contramagia", [])
+    if isinstance(contramagias, str):
+        contramagias = [contramagias] if contramagias.strip() else []
+    elif not isinstance(contramagias, (list, tuple, set)):
+        contramagias = []
+    perfil["contramagia"] = list(dict.fromkeys(
+        str(nome).strip() for nome in contramagias if str(nome).strip()
+    ))
 
     mira = str(perfil.get("mira", "")).strip()
     if mira and mira not in MIRAS:
@@ -328,9 +336,9 @@ def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
     # demais ativações, a duração continua aparecendo separadamente.
     if duracao and duracao.casefold() != "instantâneo.":
         linhas.append(duracao)
-    contramagia = str(perfil.get("contramagia", "")).strip()
-    if contramagia:
-        linhas.append(f"Contra-feitiço: {contramagia}.")
+    contramagias = perfil.get("contramagia", [])
+    if contramagias:
+        linhas.append(f"Contra-feitiço: {', '.join(contramagias)}.")
     protecao = perfil.get("protecao", {})
     if protecao.get("pv"):
         linhas.append(f"PV: {str(protecao['pv']).rstrip('.')}.")
