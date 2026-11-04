@@ -93,6 +93,46 @@ def grupos_revisao(arquivos: list[Path]) -> list[tuple[str, str, list[Path]]]:
     ]
 
 
+def revisao_concluida(arquivo: Path) -> bool:
+    try:
+        perfil = extrair_perfil(arquivo.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return bool(
+        perfil
+        and perfil.get("estado") == "completa"
+        and not pendencias(perfil)
+    )
+
+
+def proxima_ficha_pendente(sessao: SessaoFeitico) -> Path | None:
+    grupos = grupos_revisao(arquivos_categoria(sessao.categoria))
+    if not grupos:
+        return None
+
+    chave_atual = classificacao_revisao(sessao.arquivo)
+    indice_grupo = next(
+        (indice for indice, (tipo, rotulo, _) in enumerate(grupos) if (tipo, rotulo) == chave_atual),
+        0,
+    )
+    grupos_ordenados = grupos[indice_grupo:] + grupos[:indice_grupo]
+
+    for indice, (tipo, rotulo, arquivos) in enumerate(grupos_ordenados):
+        candidatos = arquivos
+        if indice == 0 and (tipo, rotulo) == chave_atual:
+            try:
+                indice_atual = arquivos.index(sessao.arquivo)
+            except ValueError:
+                indice_atual = -1
+            if indice_atual >= 0:
+                candidatos = arquivos[indice_atual + 1 :] + arquivos[:indice_atual]
+
+        for arquivo in candidatos:
+            if arquivo != sessao.arquivo and not revisao_concluida(arquivo):
+                return arquivo
+    return None
+
+
 def _ler_json(caminho: Path) -> dict[str, Any]:
     if not caminho.exists():
         return {}
@@ -436,12 +476,14 @@ class SelecionarFeiticoRevisaoView(ViewPrivada):
     @staticmethod
     def _situacao(arquivo: Path) -> str:
         rascunho = chave_arquivo(arquivo) in _ler_json(ARQUIVO_RASCUNHOS)
+        if revisao_concluida(arquivo):
+            return "Revisão completa"
         try:
             perfil = extrair_perfil(arquivo.read_text(encoding="utf-8"))
         except (OSError, ValueError, json.JSONDecodeError):
             perfil = None
         if perfil and perfil.get("estado") == "completa":
-            return "Revisão completa" if not pendencias(perfil) else "Revisão incompleta"
+            return "Revisão incompleta"
         return "Rascunho salvo" if rascunho else "Não revisado"
 
     @classmethod
@@ -611,21 +653,14 @@ class EditorFeiticoView(ViewPrivada):
                 view=EditorFeiticoView(self.usuario_id, self.sessao),
             )
             return
-        arquivos = arquivos_categoria(self.sessao.categoria)
-        indice = arquivos.index(self.sessao.arquivo)
-        seguintes = arquivos[indice + 1 :] + arquivos[:indice]
-        proximo = next(
-            (
-                arquivo
-                for arquivo in seguintes
-                if not (extrair_perfil(arquivo.read_text(encoding="utf-8")) or {}).get("estado") == "completa"
-            ),
-            None,
-        )
+        proximo = proxima_ficha_pendente(self.sessao)
         if proximo is None:
             await interaction.edit_original_response(
-                embed=embed_painel("Categoria concluída", "Todas as fichas desta categoria foram revisadas."),
-                view=SelecionarFeiticoRevisaoView(self.usuario_id, self.sessao.categoria),
+                embed=embed_painel(
+                    "Revisar feitiços",
+                    f"Categoria **{self.sessao.categoria}** concluída. Escolha outra categoria.",
+                ),
+                view=CategoriasRevisaoView(self.usuario_id),
             )
             return
         proxima_sessao = SessaoFeitico.carregar(proximo, self.sessao.categoria)
@@ -1379,9 +1414,15 @@ class SeletorContramagiaCategoriaView(ViewPrivada):
             destino, _nomes_contramagia(sessao.perfil, destino), _nomes_contramagia(sessao.perfil, destino)
         )
         categorias = sorted((p.name for p in PASTA_FEITICOS.iterdir() if p.is_dir()), key=str.casefold)
+        opcoes = [
+            discord.SelectOption(label=nome[:100], value=nome)
+            for nome in categorias[:24]
+        ]
+        if destino == "propria":
+            opcoes.insert(0, discord.SelectOption(label="Nenhum", value="__nenhum__"))
         seletor = discord.ui.Select(
             placeholder="Escolha a categoria do contra-feitiço",
-            options=[discord.SelectOption(label=nome[:100], value=nome) for nome in categorias[:25]],
+            options=opcoes,
             row=0,
         )
         seletor.callback = self.selecionar
@@ -1395,6 +1436,16 @@ class SeletorContramagiaCategoriaView(ViewPrivada):
 
     async def selecionar(self, interaction):
         categoria = interaction.data["values"][0]
+        if categoria == "__nenhum__":
+            self.estado.nomes = []
+            await interaction.response.edit_message(
+                embed=embed_painel(
+                    "Contra-feitiços associados",
+                    f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\nNenhum contra-feitiço selecionado. Confirme para salvar.",
+                ),
+                view=self,
+            )
+            return
         grupos = _grupos_contramagia(categoria)
         view = SeletorContramagiaGrupoView(self.usuario_id, self.sessao, categoria, self.destino, self.estado)
         texto = f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\nCategoria: **{categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."

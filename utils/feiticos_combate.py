@@ -392,7 +392,6 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         ("respostas", "resposta do alvo"),
         ("acumulo", "acúmulo"),
         ("encerramento", "interrupção ou encerramento"),
-        ("contramagia", "contra-feitiço deste feitiço"),
     ):
         if not perfil.get(chave):
             faltas.append(rotulo)
