@@ -1561,7 +1561,7 @@ class SeletorContramagiaFeiticoView(ViewPrivada):
             for nome in self.estado.nomes
             if nome.casefold() in referencias
         ]
-        texto = f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\n{self.categoria} — {self.grupo[1]} — página {self.pagina + 1}/{len(self.paginas)}"
+        texto = _estado_selecao_contramagia(self.sessao, self.estado, self.destino)
         if avisos:
             texto += "\n\n**Vínculos existentes:**\n" + "\n".join(avisos)
         await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", texto), view=view)
@@ -1574,7 +1574,13 @@ class SeletorContramagiaFeiticoView(ViewPrivada):
 
     async def _trocar_pagina(self, interaction, pagina):
         view = SeletorContramagiaFeiticoView(self.usuario_id, self.sessao, self.categoria, self.grupo, self.destino, pagina, self.estado)
-        await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\n{self.categoria} — {self.grupo[1]} — página {pagina + 1}/{len(view.paginas)}"), view=view)
+        await interaction.response.edit_message(
+            embed=embed_painel(
+                "Escolher contra-feitiço",
+                _estado_selecao_contramagia(self.sessao, self.estado, self.destino),
+            ),
+            view=view,
+        )
 
     async def voltar(self, interaction):
         await interaction.response.edit_message(embed=embed_painel("Escolher contra-feitiço", f"{_estado_selecao_contramagia(self.sessao, self.estado, self.destino)}\nCategoria: **{self.categoria}**\nEscolha o ano de desbloqueio ou a subcategoria."), view=SeletorContramagiaGrupoView(self.usuario_id, self.sessao, self.categoria, self.destino, self.estado))
