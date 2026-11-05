@@ -32,16 +32,8 @@ TIPOS_EFEITO = (
     "Invocação",
     "Transformação",
     "Utilidade",
-    "Contra-feitiço",
 )
 MOMENTOS_DEFESA = ("Não é defesa", "Antecipada", "Reação", "Ambas")
-MOMENTOS_CONTRA_FEITICO = (
-    "Não se aplica",
-    "Reação imediata",
-    "Defesa preparada",
-    "Reação imediata e defesa preparada",
-    "Reversão ou tratamento",
-)
 RESPOSTAS = (
     "Nenhuma",
     "Esquiva",
@@ -98,13 +90,9 @@ def perfil_vazio() -> dict[str, Any]:
             "propriedades": [],
         },
         "contra_feitico": {
-            "habilitado": False,
-            "momento": "",
             "feiticos": [],
-            "tipo_automatico": False,
-            "propriedades": [],
-            "resultado": "",
         },
+        "resposta_contrafeitico_automatica": False,
     }
 
 
@@ -124,6 +112,12 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
         duracao["unidade"] = {"Minutos": "Minuto", "Horas": "Hora", "Dias": "Dia"}.get(unidade, unidade)
     # Descrições narrativas de efeitos duplicam a descrição principal do feitiço.
     perfil.pop("efeitos", None)
+    tipos = perfil.get("tipos", [])
+    if isinstance(tipos, str):
+        tipos = [tipos]
+    elif not isinstance(tipos, (list, tuple, set)):
+        tipos = []
+    perfil["tipos"] = [tipo for tipo in tipos if tipo != "Contra-feitiço"]
     contramagias = perfil.get("contramagia", [])
     if isinstance(contramagias, str):
         contramagias = [contramagias] if contramagias.strip() else []
@@ -132,6 +126,19 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
     perfil["contramagia"] = list(dict.fromkeys(
         str(nome).strip() for nome in contramagias if str(nome).strip()
     ))
+    contra = perfil.get("contra_feitico", {})
+    if not isinstance(contra, dict):
+        contra = {}
+    feiticos = contra.get("feiticos", [])
+    if isinstance(feiticos, str):
+        feiticos = [feiticos] if feiticos.strip() else []
+    elif not isinstance(feiticos, (list, tuple, set)):
+        feiticos = []
+    perfil["contra_feitico"] = {
+        "feiticos": list(dict.fromkeys(
+            str(nome).strip() for nome in feiticos if str(nome).strip()
+        ))
+    }
 
     mira = str(perfil.get("mira", "")).strip()
     if mira and mira not in MIRAS:
@@ -166,8 +173,14 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
     # Esquiva e Reflexo permanecem escolhas do mestre. Um contra-feitiço
     # catalogado, porém, também habilita automaticamente essa resposta.
     respostas = [item for item in perfil.get("respostas", []) if item in RESPOSTAS]
+    resposta_auto = bool(perfil.get("resposta_contrafeitico_automatica"))
     if perfil.get("contramagia") and "Contra-feitiço" not in respostas:
         respostas.append("Contra-feitiço")
+        resposta_auto = True
+    elif not perfil.get("contramagia") and resposta_auto:
+        respostas = [item for item in respostas if item != "Contra-feitiço"]
+        resposta_auto = False
+    perfil["resposta_contrafeitico_automatica"] = resposta_auto
     if len(respostas) > 1:
         respostas = [item for item in respostas if item != "Nenhuma"]
     perfil["respostas"] = respostas
@@ -182,26 +195,6 @@ def extrair_perfil(conteudo: str) -> dict[str, Any] | None:
     if not isinstance(dados, dict):
         raise ValueError("O bloco técnico de combate precisa conter um objeto JSON.")
     return normalizar_perfil(dados)
-
-
-def contra_feiticos_de(nome_feitico: str, pasta: Path | None = None) -> list[str]:
-    """Lista as fichas que catalogam este feitiço como contra-feitiço."""
-    pasta = pasta or (Path("biblioteca") / "feitiços")
-    alvo = nome_feitico.strip().casefold()
-    encontrados: dict[str, str] = {}
-    if not alvo or not pasta.exists():
-        return []
-    for arquivo in pasta.rglob("*.md"):
-        try:
-            perfil = extrair_perfil(arquivo.read_text(encoding="utf-8"))
-        except (OSError, ValueError, json.JSONDecodeError):
-            continue
-        if not perfil:
-            continue
-        nomes = perfil.get("contramagia", [])
-        if any(str(nome).strip().casefold() == alvo for nome in nomes):
-            encontrados.setdefault(arquivo.stem.casefold(), arquivo.stem)
-    return sorted(encontrados.values(), key=str.casefold)
 
 
 def remover_bloco(conteudo: str) -> str:
@@ -299,14 +292,13 @@ def salvar_revisao(caminho: Path, perfil: dict[str, Any], descricao: str) -> Non
 
 
 def _plural(valor: str, unidade: str) -> str:
+    if unidade in {"Minuto", "Hora", "Dia"}:
+        return {"Minuto": "minuto(s)", "Hora": "hora(s)", "Dia": "dia(s)"}[unidade]
     if not valor or valor == "1":
         return unidade.casefold()
     mapa = {
         "Turno": "turnos",
         "Rodada": "rodadas",
-        "Minuto": "minutos",
-        "Hora": "horas",
-        "Dia": "dias",
         "Cena": "cenas",
     }
     return mapa.get(unidade, unidade.casefold())
@@ -331,7 +323,7 @@ def linha_duracao(perfil: dict[str, Any]) -> str:
         return "Duração: Instantânea."
     if unidade == "Cena":
         if not valor:
-            return ""
+            return "Duração: Cena."
         return f"Duração: {valor} {_plural(valor, unidade)}."
     if unidade:
         if not valor:
@@ -343,7 +335,7 @@ def linha_duracao(perfil: dict[str, Any]) -> str:
 
 def linhas_publicas(
     perfil_original: dict[str, Any] | None,
-    contra_de: list[str] | None = None,
+    nome_feitico: str = "",
 ) -> list[str]:
     perfil = normalizar_perfil(perfil_original)
     linhas: list[str] = []
@@ -380,11 +372,17 @@ def linhas_publicas(
     # A duração é uma regra própria e aparece mesmo quando a execução é instantânea.
     if duracao:
         linhas.append(duracao)
-    contramagias = perfil.get("contramagia", [])
-    if contramagias:
-        linhas.append(f"Contra-feitiço: {', '.join(contramagias)}.")
-    if contra_de:
-        linhas.append(f"Contra-feitiço de: {', '.join(contra_de)}.")
+    if nome_feitico:
+        anulados = perfil.get("contra_feitico", {}).get("feiticos", [])
+        contramagias = perfil.get("contramagia", [])
+        linhas.append(
+            f"Feitiços anulados por {nome_feitico}: "
+            f"{', '.join(anulados) if anulados else 'Nenhum (não é contra-feitiço).'}"
+        )
+        linhas.append(
+            f"Contra-feitiço de {nome_feitico}: "
+            f"{', '.join(contramagias) if contramagias else 'Nenhum.'}"
+        )
     protecao = perfil.get("protecao", {})
     if protecao.get("pv"):
         linhas.append(f"PV: {str(protecao['pv']).rstrip('.')}.")
@@ -413,9 +411,9 @@ def linhas_publicas(
 def descricao_publica(
     descricao: str,
     perfil: dict[str, Any] | None,
-    contra_de: list[str] | None = None,
+    nome_feitico: str = "",
 ) -> str:
-    linhas = linhas_publicas(perfil, contra_de)
+    linhas = linhas_publicas(perfil, nome_feitico)
     partes = []
     if descricao.strip():
         partes.append(f"**{descricao.strip()}**")
@@ -453,7 +451,7 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
     unidade_duracao = str(duracao.get("unidade", ""))
     if perfil.get("ativacao") != "Instantânea" and not unidade_duracao:
         faltas.append("duração")
-    if unidade_duracao in {"Turno", "Rodada", "Minuto", "Hora", "Dia", "Cena"} and not str(duracao.get("valor", "")).strip():
+    if unidade_duracao in {"Turno", "Rodada", "Minuto", "Hora", "Dia"} and not str(duracao.get("valor", "")).strip():
         faltas.append("quantidade da duração")
     if unidade_duracao == "Especial":
         fora = str(duracao.get("fora_combate", "")).strip()
@@ -473,13 +471,4 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         defesa.get("propriedades") or defesa.get("ocasioes")
     ):
         faltas.append("ocasiões da defesa")
-    contra = perfil.get("contra_feitico", {})
-    contra_selecionado = "Contra-feitiço" in perfil.get("tipos", [])
-    if (contra_selecionado or contra.get("habilitado")) and not (
-        contra.get("habilitado") and contra.get("momento")
-    ):
-        faltas.append("modo de uso do contra-feitiço")
-    if contra.get("habilitado") or contra_selecionado:
-        if not contra.get("feiticos"):
-            faltas.append("feitiço anulado selecionado na biblioteca")
     return faltas

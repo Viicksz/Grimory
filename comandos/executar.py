@@ -12,7 +12,7 @@ from utils.biblioteca import (
     interpretar_markdown,
     normalizar_rotulo,
 )
-from utils.feiticos_combate import contra_feiticos_de, descricao_publica
+from utils.feiticos_combate import descricao_publica
 from utils.publicacao_fichas import ErroPublicacaoFicha, carregar_destinos_fichas
 
 
@@ -300,7 +300,7 @@ def criar_embeds_entrada(
         descricao_publica(
             entrada.descricao,
             entrada.perfil_combate,
-            contra_feiticos_de(nome),
+            nome,
         )
         if not eh_runa and not eh_bindruna
         else entrada.descricao
