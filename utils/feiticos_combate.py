@@ -21,7 +21,7 @@ ALCANCES = ("Pessoal", "Contato", "Curto", "Médio", "Longo", "Campo de Visão",
 ALVOS = ("Pessoal", "Criatura", "Objeto", "Ponto", "Múltiplos", "Área", "Especial")
 TIPOS_ACAO = ("Livre", "Movimento", "Padrão", "Completa", "Reação")
 ATIVACOES = ("Instantânea", "Sustentada", "Preparada")
-UNIDADES_DURACAO = ("Instantâneo", "Turno", "Rodada", "Minuto", "Cena")
+UNIDADES_DURACAO = ("Instantâneo", "Turno", "Rodada", "Minuto", "Hora", "Dia", "Cena", "Especial")
 TIPOS_EFEITO = (
     "Dano",
     "Cura",
@@ -64,7 +64,7 @@ def perfil_vazio() -> dict[str, Any]:
         "tipo_acao": "",
         "ativacao": "",
         "gatilho": "",
-        "duracao": {"valor": "", "unidade": ""},
+        "duracao": {"valor": "", "unidade": "", "especial": "", "fora_combate": "", "em_combate": ""},
         "alcance": "",
         "detalhes_alcance": "",
         "alvo": "",
@@ -117,6 +117,10 @@ def normalizar_perfil(dados: dict[str, Any] | None) -> dict[str, Any]:
         else:
             perfil[chave] = deepcopy(valor)
     perfil["versao"] = 2
+    duracao = perfil.get("duracao", {})
+    if isinstance(duracao, dict):
+        unidade = str(duracao.get("unidade", "")).strip()
+        duracao["unidade"] = {"Minutos": "Minuto", "Horas": "Hora", "Dias": "Dia"}.get(unidade, unidade)
     # Descrições narrativas de efeitos duplicam a descrição principal do feitiço.
     perfil.pop("efeitos", None)
     contramagias = perfil.get("contramagia", [])
@@ -280,6 +284,8 @@ def _plural(valor: str, unidade: str) -> str:
         "Turno": "turnos",
         "Rodada": "rodadas",
         "Minuto": "minutos",
+        "Hora": "horas",
+        "Dia": "dias",
         "Cena": "cenas",
     }
     return mapa.get(unidade, unidade.casefold())
@@ -290,12 +296,24 @@ def linha_duracao(perfil: dict[str, Any]) -> str:
     duracao = perfil.get("duracao", {})
     unidade = str(duracao.get("unidade", ""))
     valor = str(duracao.get("valor", "")).strip()
-    if ativacao == "Instantânea" or unidade == "Instantâneo":
-        return "Instantâneo."
+    if unidade == "Especial":
+        fora = str(duracao.get("fora_combate", "")).strip()
+        dentro = str(duracao.get("em_combate", "")).strip()
+        especial = str(duracao.get("especial", "")).strip()
+        partes = []
+        if fora and dentro:
+            partes.extend((f"Fora de combate: {fora}", f"Em combate: {dentro}"))
+        elif especial:
+            partes.append(especial)
+        return f"Duração especial: {'; '.join(partes)}." if partes else ""
+    if unidade == "Instantâneo" or (not unidade and ativacao == "Instantânea"):
+        return "Duração: Instantânea."
     if unidade == "Cena":
         return f"Duração de {valor + ' ' if valor else ''}{_plural(valor, unidade)}."
     if unidade:
-        quantidade = valor or "1"
+        if not valor:
+            return ""
+        quantidade = valor
         return f"Duração de {quantidade} {_plural(quantidade, unidade)}."
     return ""
 
@@ -333,9 +351,8 @@ def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
     if ativacao:
         linhas.append(f"Tempo de Execução: {ativacao}.")
     duracao = linha_duracao(perfil)
-    # Instantânea já está representada pelo tempo de execução; para as
-    # demais ativações, a duração continua aparecendo separadamente.
-    if duracao and duracao.casefold() != "instantâneo.":
+    # A duração é uma regra própria e aparece mesmo quando a execução é instantânea.
+    if duracao:
         linhas.append(duracao)
     contramagias = perfil.get("contramagia", [])
     if contramagias:
@@ -367,15 +384,10 @@ def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
 
 def descricao_publica(descricao: str, perfil: dict[str, Any] | None) -> str:
     linhas = linhas_publicas(perfil)
-    if not linhas:
-        return descricao.strip()
-    mira, *mecanicas = linhas
-    # Mantém a leitura natural: mira, alcance/alvo/duração, resumo do efeito
-    # e só então o texto narrativo original.
-    partes = [f"`{mira}`"]
-    partes.extend(f"`{linha}`" for linha in mecanicas)
+    partes = []
     if descricao.strip():
-        partes.append(descricao.strip())
+        partes.append(f"**{descricao.strip()}**")
+    partes.extend(f"`{linha}`" for linha in linhas)
     return "\n".join(parte for parte in partes if parte)
 
 
@@ -405,10 +417,19 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         faltas.append("dimensões e afetados da área")
     if perfil.get("ativacao") == "Preparada" and not perfil.get("gatilho"):
         faltas.append("gatilho da magia preparada")
-    if perfil.get("ativacao") != "Instantânea":
-        duracao = perfil.get("duracao", {})
-        if not duracao.get("unidade"):
-            faltas.append("duração")
+    duracao = perfil.get("duracao", {})
+    unidade_duracao = str(duracao.get("unidade", ""))
+    if perfil.get("ativacao") != "Instantânea" and not unidade_duracao:
+        faltas.append("duração")
+    if unidade_duracao in {"Turno", "Rodada", "Minuto", "Hora", "Dia", "Cena"} and not str(duracao.get("valor", "")).strip():
+        faltas.append("quantidade da duração")
+    if unidade_duracao == "Especial":
+        fora = str(duracao.get("fora_combate", "")).strip()
+        dentro = str(duracao.get("em_combate", "")).strip()
+        if not str(duracao.get("especial", "")).strip() and not (fora and dentro):
+            faltas.append("duração especial ou duração dentro e fora de combate")
+        elif bool(fora) != bool(dentro):
+            faltas.append("duração para combate e fora de combate")
     if "Dano" in perfil.get("tipos", []) and not perfil.get("dano", {}).get("inicial") and not perfil.get("dano", {}).get("sustentado"):
         faltas.append("dano")
     if "Cura" in perfil.get("tipos", []) and not perfil.get("cura", {}).get("formula"):

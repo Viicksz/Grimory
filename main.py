@@ -22,7 +22,7 @@ from comandos.passagem_ano import PassagemAno
 from comandos.preparar import Preparar
 from comandos.quadribol import Quadribol
 from comandos.remover import Remover
-from comandos.revisar_feiticos import RevisarFeiticos
+from comandos.revisar_feiticos import RevisarFeiticos, sincronizar_feiticos_completos
 from comandos.taca import TacaDasCasas
 from comandos.xp import XP
 
@@ -46,6 +46,9 @@ async def on_ready():
     global _COMANDOS_SINCRONIZADOS
     if not _COMANDOS_SINCRONIZADOS:
         await bot.tree.sync()
+        atualizados = await sincronizar_feiticos_completos(bot)
+        if atualizados:
+            print(f"Fichas de feitiços atualizadas nas threads: {len(atualizados)}")
         _COMANDOS_SINCRONIZADOS = True
     print(f"{bot.user} esta online. Pasta: {os.getcwd()}")
 

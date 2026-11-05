@@ -29,6 +29,7 @@ from utils.feiticos_combate import (
     UNIDADES_DURACAO,
     descricao_publica,
     extrair_perfil,
+    linha_duracao,
     limpar_mecanicas_legadas,
     normalizar_perfil,
     pendencias,
@@ -217,7 +218,9 @@ def destino_revisao(sessao: SessaoFeitico) -> tuple[int | None, str]:
     return destinos.get((normalizar_rotulo(secao), normalizar_rotulo(chave))), secao
 
 
-async def sincronizar_publicacao_feitico(cliente, sessao: SessaoFeitico) -> bool:
+async def sincronizar_publicacao_feitico(
+    cliente, sessao: SessaoFeitico, *, criar_se_ausente: bool = True
+) -> bool:
     """Atualiza a publicação existente da ficha, ou cria-a se ainda não existir."""
     thread_id, _ = destino_revisao(sessao)
     if thread_id is None:
@@ -238,6 +241,8 @@ async def sincronizar_publicacao_feitico(cliente, sessao: SessaoFeitico) -> bool
                 if (titulo or "").casefold() == sessao.arquivo.stem.casefold() or sessao.arquivo.stem.casefold() in (mensagem.content or "").casefold():
                     mensagem_id = mensagem.id
                     break
+        if not mensagem_id and not criar_se_ausente:
+            return False
         await publicar_ou_atualizar_ficha(
             cliente, thread_id, embeds[:10], mensagem_id=mensagem_id,
             conteudo="", anexos=(),
@@ -257,7 +262,9 @@ async def sincronizar_feiticos_completos(cliente) -> list[str]:
                 sessao = SessaoFeitico.carregar(arquivo, categoria)
                 if sessao.perfil.get("estado") != "completa":
                     continue
-                if await sincronizar_publicacao_feitico(cliente, sessao):
+                if await sincronizar_publicacao_feitico(
+                    cliente, sessao, criar_se_ausente=False
+                ):
                     atualizados.append(arquivo.stem)
             except (OSError, ValueError, json.JSONDecodeError, discord.HTTPException, ErroPublicacaoFicha):
                 continue
@@ -272,6 +279,11 @@ def resumo_perfil(sessao: SessaoFeitico) -> discord.Embed:
     perfil = normalizar_perfil(sessao.perfil)
     faltas = pendencias(perfil)
     duracao = perfil.get("duracao", {})
+    texto_duracao = linha_duracao(perfil) or "--"
+    for prefixo in ("Duração: ", "Duração de ", "Duração especial: "):
+        if texto_duracao.startswith(prefixo):
+            texto_duracao = texto_duracao[len(prefixo):]
+            break
     embed = embed_painel(
         f"Revisão — {sessao.arquivo.stem}",
         (sessao.descricao[:1200] + ("…" if len(sessao.descricao) > 1200 else "")) or "--",
@@ -288,7 +300,7 @@ def resumo_perfil(sessao: SessaoFeitico) -> discord.Embed:
     embed.add_field(
         name="Duração e tipos",
         value=(
-            f"Duração: **{duracao.get('valor') or ''} {duracao.get('unidade') or '--'}**\n"
+            f"Duração: **{texto_duracao}**\n"
             f"Tipos: **{', '.join(perfil.get('tipos', [])) or '--'}**"
         ),
         inline=True,
@@ -796,9 +808,8 @@ class TiposFeiticoView(ViewPrivada):
 
 
 def resumo_duracao_alvo(sessao: SessaoFeitico) -> discord.Embed:
-    duracao = sessao.perfil.get("duracao", {})
-    unidade = duracao.get("unidade") or "--"
-    valor = duracao.get("valor") or ""
+    perfil = normalizar_perfil(sessao.perfil)
+    duracao = perfil.get("duracao", {})
     alcance = sessao.perfil.get("alcance") or "--"
     detalhes_alcance = sessao.perfil.get("detalhes_alcance", "")
     alvo = sessao.perfil.get("alvo") or "--"
@@ -808,17 +819,22 @@ def resumo_duracao_alvo(sessao: SessaoFeitico) -> discord.Embed:
         else sessao.perfil.get("detalhes_alvo", "")
     )
     linhas = [
-        f"Duração: **{f'{valor} {unidade}'.strip()}**",
+        f"**{linha_duracao(perfil) or duracao.get('unidade') or '--'}**",
         f"Alcance: **{alcance}**" + (f" — {detalhes_alcance}" if detalhes_alcance else ""),
         f"Alvo: **{alvo}**" + (f" — {detalhes_alvo}" if detalhes_alvo else ""),
     ]
-    if sessao.perfil.get("mira") == "Especial":
+    if perfil.get("mira") == "Especial":
         linhas.append(
             "Manifestação especial: **"
-            f"{sessao.perfil.get('detalhes_mira') or '--'}**"
+            f"{perfil.get('detalhes_mira') or '--'}**"
         )
-    if sessao.perfil.get("ativacao") == "Preparada":
-        linhas.append(f"Gatilho: **{sessao.perfil.get('gatilho') or '--'}**")
+    if perfil.get("ativacao") == "Preparada":
+        linhas.append(f"Gatilho: **{perfil.get('gatilho') or '--'}**")
+    avisos = [falta for falta in pendencias(perfil) if any(
+        termo in falta for termo in ("duração", "quantidade da duração", "alcance", "alvo", "área", "manifestação")
+    )]
+    if avisos:
+        linhas.append("**Pendente:** " + ", ".join(avisos))
     return embed_painel(
         "Duração, alcance e alvo",
         "\n".join(linhas)
@@ -835,7 +851,11 @@ class DuracaoAlvoView(ViewPrivada):
         self.unidade = discord.ui.Select(
             placeholder="Escolha a duração",
             options=[
-                discord.SelectOption(label=unidade, value=unidade, default=unidade == atual)
+                discord.SelectOption(
+                    label={"Minuto": "Minutos", "Hora": "Horas", "Dia": "Dias"}.get(unidade, unidade),
+                    value=unidade,
+                    default=unidade == atual,
+                )
                 for unidade in UNIDADES_DURACAO
             ],
             row=0,
@@ -872,8 +892,12 @@ class DuracaoAlvoView(ViewPrivada):
         )
         self.alvo.callback = self.selecionar_alvo
         self.add_item(self.alvo)
+        if atual and atual != "Instantâneo":
+            duracao_btn = discord.ui.Button(label="Detalhes da duração", style=discord.ButtonStyle.primary, row=3)
+            duracao_btn.callback = self.editar_duracao
+            self.add_item(duracao_btn)
         detalhes = discord.ui.Button(
-            label="Detalhes (Opcional)",
+            label="Detalhes de alcance e alvo",
             style=discord.ButtonStyle.primary,
             row=3,
         )
@@ -895,9 +919,15 @@ class DuracaoAlvoView(ViewPrivada):
         self.add_item(voltar)
 
     async def selecionar_unidade(self, interaction):
-        self.sessao.perfil.setdefault("duracao", {})["unidade"] = self.unidade.values[0]
-        if self.unidade.values[0] == "Instantâneo":
-            self.sessao.perfil["duracao"]["valor"] = ""
+        duracao = self.sessao.perfil.setdefault("duracao", {})
+        unidade = self.unidade.values[0]
+        duracao["unidade"] = unidade
+        if unidade == "Instantâneo":
+            duracao.update(valor="", especial="", fora_combate="", em_combate="")
+        elif unidade == "Especial":
+            duracao["valor"] = ""
+        else:
+            duracao.update(especial="", fora_combate="", em_combate="")
         self.sessao.salvar_rascunho()
         await interaction.response.edit_message(
             embed=resumo_duracao_alvo(self.sessao),
@@ -925,6 +955,9 @@ class DuracaoAlvoView(ViewPrivada):
     async def detalhes(self, interaction):
         await interaction.response.send_modal(DetalhesDuracaoModal(self.usuario_id, self.sessao))
 
+    async def editar_duracao(self, interaction):
+        await interaction.response.send_modal(DuracaoModal(self.usuario_id, self.sessao))
+
     async def gatilho(self, interaction):
         await interaction.response.send_modal(GatilhoPreparadoModal(self.usuario_id, self.sessao))
 
@@ -939,18 +972,57 @@ class DuracaoAlvoView(ViewPrivada):
         )
 
 
-class DetalhesDuracaoModal(discord.ui.Modal, title="Duração, alcance e alvo"):
+class DuracaoModal(discord.ui.Modal, title="Detalhes da duração"):
     def __init__(self, usuario_id, sessao):
         super().__init__()
         self.usuario_id, self.sessao = usuario_id, sessao
         duracao = sessao.perfil.get("duracao", {})
-        self.valor = discord.ui.TextInput(
-            label="Quantidade (Opcional)",
-            required=False,
-            placeholder="Ex.: 2 rodadas ou 1d4+2 turnos.",
-            default=duracao.get("valor", ""),
-            max_length=30,
+        self.especial = duracao.get("unidade") == "Especial"
+        if self.especial:
+            self.descricao = discord.ui.TextInput(
+                label="Duração especial (Opcional)", required=False,
+                placeholder="Ex.: varia conforme a situação.",
+                default=duracao.get("especial", ""), max_length=300,
+            )
+            self.fora = discord.ui.TextInput(
+                label="Fora de combate (Opcional)", required=False,
+                placeholder="Ex.: 8 horas", default=duracao.get("fora_combate", ""), max_length=100,
+            )
+            self.combate = discord.ui.TextInput(
+                label="Em combate (Opcional)", required=False,
+                placeholder="Ex.: 3 rodadas", default=duracao.get("em_combate", ""), max_length=100,
+            )
+            for item in (self.descricao, self.fora, self.combate):
+                self.add_item(item)
+        else:
+            unidade = str(duracao.get("unidade", "duração")).casefold()
+            self.valor = discord.ui.TextInput(
+                label="Quantidade (Obrigatório)", required=True,
+                placeholder=f"Ex.: 2 {unidade} ou 1d4+2 {unidade}.",
+                default=duracao.get("valor", ""), max_length=50,
+            )
+            self.add_item(self.valor)
+
+    async def on_submit(self, interaction):
+        duracao = self.sessao.perfil.setdefault("duracao", {})
+        if self.especial:
+            duracao["especial"] = str(self.descricao).strip()
+            duracao["fora_combate"] = str(self.fora).strip()
+            duracao["em_combate"] = str(self.combate).strip()
+        else:
+            duracao["valor"] = str(self.valor).strip()
+        self.sessao.perfil = normalizar_perfil(self.sessao.perfil)
+        self.sessao.salvar_rascunho()
+        await interaction.response.edit_message(
+            embed=resumo_duracao_alvo(self.sessao),
+            view=DuracaoAlvoView(self.usuario_id, self.sessao),
         )
+
+
+class DetalhesDuracaoModal(discord.ui.Modal, title="Duração, alcance e alvo"):
+    def __init__(self, usuario_id, sessao):
+        super().__init__()
+        self.usuario_id, self.sessao = usuario_id, sessao
         self.detalhes_alcance = discord.ui.TextInput(
             label="Detalhes (Opcional)",
             required=False,
@@ -980,7 +1052,7 @@ class DetalhesDuracaoModal(discord.ui.Modal, title="Duração, alcance e alvo"):
             ),
             max_length=500,
         )
-        itens = [self.valor, self.detalhes_alcance, self.detalhes_alvo]
+        itens = [self.detalhes_alcance, self.detalhes_alvo]
         if sessao.perfil.get("mira") == "Especial":
             self.detalhes_mira = discord.ui.TextInput(
                 label="Manifestação especial (Obrigatório)",
@@ -994,7 +1066,6 @@ class DetalhesDuracaoModal(discord.ui.Modal, title="Duração, alcance e alvo"):
             self.add_item(item)
 
     async def on_submit(self, interaction):
-        self.sessao.perfil.setdefault("duracao", {})["valor"] = str(self.valor).strip()
         self.sessao.perfil["detalhes_alcance"] = str(self.detalhes_alcance).strip()
         if self.sessao.perfil.get("alvo") == "Área":
             self.sessao.perfil["area"] = str(self.detalhes_alvo).strip()
