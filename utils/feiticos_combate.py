@@ -101,6 +101,7 @@ def perfil_vazio() -> dict[str, Any]:
             "habilitado": False,
             "momento": "",
             "feiticos": [],
+            "tipo_automatico": False,
             "propriedades": [],
             "resultado": "",
         },
@@ -181,6 +182,26 @@ def extrair_perfil(conteudo: str) -> dict[str, Any] | None:
     if not isinstance(dados, dict):
         raise ValueError("O bloco técnico de combate precisa conter um objeto JSON.")
     return normalizar_perfil(dados)
+
+
+def contra_feiticos_de(nome_feitico: str, pasta: Path | None = None) -> list[str]:
+    """Lista as fichas que catalogam este feitiço como contra-feitiço."""
+    pasta = pasta or (Path("biblioteca") / "feitiços")
+    alvo = nome_feitico.strip().casefold()
+    encontrados: dict[str, str] = {}
+    if not alvo or not pasta.exists():
+        return []
+    for arquivo in pasta.rglob("*.md"):
+        try:
+            perfil = extrair_perfil(arquivo.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not perfil:
+            continue
+        nomes = perfil.get("contramagia", [])
+        if any(str(nome).strip().casefold() == alvo for nome in nomes):
+            encontrados.setdefault(arquivo.stem.casefold(), arquivo.stem)
+    return sorted(encontrados.values(), key=str.casefold)
 
 
 def remover_bloco(conteudo: str) -> str:
@@ -305,20 +326,25 @@ def linha_duracao(perfil: dict[str, Any]) -> str:
             partes.extend((f"Fora de combate: {fora}", f"Em combate: {dentro}"))
         elif especial:
             partes.append(especial)
-        return f"Duração especial: {'; '.join(partes)}." if partes else ""
+        return f"Duração: {'; '.join(partes)}." if partes else ""
     if unidade == "Instantâneo" or (not unidade and ativacao == "Instantânea"):
         return "Duração: Instantânea."
     if unidade == "Cena":
-        return f"Duração de {valor + ' ' if valor else ''}{_plural(valor, unidade)}."
+        if not valor:
+            return ""
+        return f"Duração: {valor} {_plural(valor, unidade)}."
     if unidade:
         if not valor:
             return ""
         quantidade = valor
-        return f"Duração de {quantidade} {_plural(quantidade, unidade)}."
+        return f"Duração: {quantidade} {_plural(quantidade, unidade)}."
     return ""
 
 
-def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
+def linhas_publicas(
+    perfil_original: dict[str, Any] | None,
+    contra_de: list[str] | None = None,
+) -> list[str]:
     perfil = normalizar_perfil(perfil_original)
     linhas: list[str] = []
     if perfil.get("mira"):
@@ -357,6 +383,8 @@ def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
     contramagias = perfil.get("contramagia", [])
     if contramagias:
         linhas.append(f"Contra-feitiço: {', '.join(contramagias)}.")
+    if contra_de:
+        linhas.append(f"Contra-feitiço de: {', '.join(contra_de)}.")
     protecao = perfil.get("protecao", {})
     if protecao.get("pv"):
         linhas.append(f"PV: {str(protecao['pv']).rstrip('.')}.")
@@ -382,8 +410,12 @@ def linhas_publicas(perfil_original: dict[str, Any] | None) -> list[str]:
     return linhas
 
 
-def descricao_publica(descricao: str, perfil: dict[str, Any] | None) -> str:
-    linhas = linhas_publicas(perfil)
+def descricao_publica(
+    descricao: str,
+    perfil: dict[str, Any] | None,
+    contra_de: list[str] | None = None,
+) -> str:
+    linhas = linhas_publicas(perfil, contra_de)
     partes = []
     if descricao.strip():
         partes.append(f"**{descricao.strip()}**")
@@ -443,7 +475,9 @@ def pendencias(perfil_original: dict[str, Any] | None) -> list[str]:
         faltas.append("ocasiões da defesa")
     contra = perfil.get("contra_feitico", {})
     contra_selecionado = "Contra-feitiço" in perfil.get("tipos", [])
-    if contra_selecionado and not (contra.get("habilitado") and contra.get("momento")):
+    if (contra_selecionado or contra.get("habilitado")) and not (
+        contra.get("habilitado") and contra.get("momento")
+    ):
         faltas.append("modo de uso do contra-feitiço")
     if contra.get("habilitado") or contra_selecionado:
         if not contra.get("feiticos"):

@@ -27,6 +27,7 @@ from utils.feiticos_combate import (
     TIPOS_ACAO,
     TIPOS_EFEITO,
     UNIDADES_DURACAO,
+    contra_feiticos_de,
     descricao_publica,
     extrair_perfil,
     linha_duracao,
@@ -259,9 +260,15 @@ async def sincronizar_feiticos_completos(cliente) -> list[str]:
     for categoria in (item.name for item in PASTA_FEITICOS.iterdir() if item.is_dir()):
         for arquivo in arquivos_categoria(categoria):
             try:
-                sessao = SessaoFeitico.carregar(arquivo, categoria)
-                if sessao.perfil.get("estado") != "completa":
+                conteudo = arquivo.read_text(encoding="utf-8")
+                perfil = extrair_perfil(conteudo)
+                if not perfil or perfil.get("estado") != "completa":
                     continue
+                entrada = interpretar_markdown(conteudo)
+                sessao = SessaoFeitico(
+                    arquivo, categoria, perfil,
+                    limpar_mecanicas_legadas(entrada.descricao),
+                )
                 if await sincronizar_publicacao_feitico(
                     cliente, sessao, criar_se_ausente=False
                 ):
@@ -269,6 +276,181 @@ async def sincronizar_feiticos_completos(cliente) -> list[str]:
             except (OSError, ValueError, json.JSONDecodeError, discord.HTTPException, ErroPublicacaoFicha):
                 continue
     return atualizados
+
+
+def reconciliar_vinculos_contrafeitico() -> int:
+    """Unifica relações antigas e grava os dois lados do vínculo."""
+    perfis: dict[str, tuple[Path, dict[str, Any], str, str]] = {}
+    for arquivo in PASTA_FEITICOS.rglob("*.md"):
+        try:
+            conteudo = arquivo.read_text(encoding="utf-8")
+            perfil = extrair_perfil(conteudo)
+            if not perfil:
+                continue
+            entrada = interpretar_markdown(conteudo)
+            perfis[arquivo.stem.casefold()] = (
+                arquivo,
+                perfil,
+                arquivo.stem,
+                limpar_mecanicas_legadas(entrada.descricao),
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+
+    relacoes: set[tuple[str, str]] = set()
+    for chave, (_, perfil, nome, _) in perfis.items():
+        for contra_nome in _nomes_contramagia(perfil, "propria"):
+            contra = perfis.get(contra_nome.casefold())
+            if contra:
+                relacoes.add((chave, contra[2].casefold()))
+        for alvo_nome in _nomes_contramagia(perfil, "alvos"):
+            alvo = perfis.get(alvo_nome.casefold())
+            if alvo:
+                relacoes.add((alvo_nome.casefold(), chave))
+
+    atualizados = 0
+    for chave, (arquivo, perfil, nome, descricao) in perfis.items():
+        contras = sorted(
+            (perfis[contra][2] for alvo, contra in relacoes if alvo == chave),
+            key=str.casefold,
+        )
+        alvos = sorted(
+            (perfis[alvo][2] for alvo, contra in relacoes if contra == chave),
+            key=str.casefold,
+        )
+        contra = perfil.setdefault("contra_feitico", {})
+        tipos = perfil.setdefault("tipos", [])
+        tipo_auto = bool(contra.get("tipo_automatico"))
+        if (
+            perfil.get("contramagia", []) == contras
+            and contra.get("feiticos", []) == alvos
+            and (not alvos or "Contra-feitiço" in tipos)
+            and (alvos or not tipo_auto)
+        ):
+            continue
+        entrada = SessaoFeitico(
+            arquivo, arquivo.relative_to(PASTA_FEITICOS).parts[0], perfil, descricao
+        )
+        criar_backup(entrada)
+        perfil["contramagia"] = contras
+        contra["feiticos"] = alvos
+        if alvos:
+            contra["habilitado"] = True
+            if "Contra-feitiço" not in tipos:
+                tipos.append("Contra-feitiço")
+                contra["tipo_automatico"] = True
+        elif tipo_auto:
+            perfil["tipos"] = [tipo for tipo in tipos if tipo != "Contra-feitiço"]
+            contra["tipo_automatico"] = False
+            contra["habilitado"] = False
+            contra["momento"] = ""
+        elif "Contra-feitiço" not in tipos:
+            contra["habilitado"] = False
+            contra["momento"] = ""
+        perfil = normalizar_perfil(perfil)
+        salvar_revisao(arquivo, perfil, descricao)
+        atualizados += 1
+    return atualizados
+
+
+async def sincronizar_vinculos_contrafeitico(
+    cliente, sessao_atual: SessaoFeitico, perfil_anterior: dict[str, Any]
+) -> None:
+    """Mantém sincronizados os dois lados do vínculo entre contra-feitiços."""
+    anterior = normalizar_perfil(perfil_anterior)
+    atual = normalizar_perfil(sessao_atual.perfil)
+    contra_anterior = set(_nomes_contramagia(anterior, "propria"))
+    contra_atual = set(_nomes_contramagia(atual, "propria"))
+    contra_atual_normalizados = {nome.casefold() for nome in contra_atual}
+    alvos_anteriores = set(_nomes_contramagia(anterior, "alvos"))
+    alvos_atuais = set(_nomes_contramagia(atual, "alvos"))
+    alvos_atuais_normalizados = {nome.casefold() for nome in alvos_atuais}
+    nome_atual = sessao_atual.arquivo.stem
+
+    arquivos_por_nome = {
+        arquivo.stem.casefold(): arquivo for arquivo in PASTA_FEITICOS.rglob("*.md")
+    }
+
+    async def atualizar_perfil_relacionado(arquivo: Path, alterar) -> None:
+        try:
+            conteudo = arquivo.read_text(encoding="utf-8")
+            perfil = extrair_perfil(conteudo)
+            if not perfil:
+                return
+            entrada = interpretar_markdown(conteudo)
+            categoria = arquivo.relative_to(PASTA_FEITICOS).parts[0]
+            sessao = SessaoFeitico(
+                arquivo, categoria, perfil, limpar_mecanicas_legadas(entrada.descricao)
+            )
+            if not alterar(perfil):
+                return
+            criar_backup(sessao)
+            salvar_revisao(arquivo, perfil, sessao.descricao)
+            if perfil.get("estado") == "completa":
+                sessao.perfil = perfil
+                await sincronizar_publicacao_feitico(
+                    cliente, sessao, criar_se_ausente=False
+                )
+        except (OSError, ValueError, json.JSONDecodeError, discord.HTTPException, ErroPublicacaoFicha):
+            return
+
+    # Alterar a lista de contra-feitiços deste feitiço atualiza os feitiços
+    # escolhidos: eles passam a registrar que anulam este feitiço.
+    if contra_anterior != contra_atual:
+        for nome in contra_anterior | contra_atual:
+            arquivo = arquivos_por_nome.get(nome.casefold())
+            if not arquivo or arquivo.resolve() == sessao_atual.arquivo.resolve():
+                continue
+
+            def atualizar_alvos(perfil, nome=nome):
+                contra = perfil.setdefault("contra_feitico", {})
+                existentes = _nomes_contramagia(perfil, "alvos")
+                atualizados = [item for item in existentes if item.casefold() != nome_atual.casefold()]
+                if nome.casefold() in contra_atual_normalizados:
+                    atualizados.append(nome_atual)
+                atualizados = list(dict.fromkeys(atualizados))
+                if atualizados == existentes:
+                    return False
+                contra["feiticos"] = atualizados
+                tipos = perfil.setdefault("tipos", [])
+                if atualizados and "Contra-feitiço" not in tipos:
+                    tipos.append("Contra-feitiço")
+                    contra["tipo_automatico"] = True
+                elif not atualizados and contra.get("tipo_automatico"):
+                    perfil["tipos"] = [tipo for tipo in tipos if tipo != "Contra-feitiço"]
+                    contra["tipo_automatico"] = False
+                contra["habilitado"] = bool(atualizados) or "Contra-feitiço" in perfil.get("tipos", [])
+                if not contra["habilitado"]:
+                    contra["momento"] = ""
+                return True
+
+            await atualizar_perfil_relacionado(arquivo, atualizar_alvos)
+
+    # Alterar a lista de feitiços anulados por este atualiza, por sua vez,
+    # a lista de contra-feitiços dos feitiços escolhidos.
+    if alvos_anteriores != alvos_atuais:
+        for nome in alvos_anteriores | alvos_atuais:
+            arquivo = arquivos_por_nome.get(nome.casefold())
+            if not arquivo or arquivo.resolve() == sessao_atual.arquivo.resolve():
+                continue
+
+            def atualizar_contramagia(perfil):
+                existentes = _nomes_contramagia(perfil, "propria")
+                atualizados = [item for item in existentes if item.casefold() != nome_atual.casefold()]
+                if nome.casefold() in alvos_atuais_normalizados:
+                    atualizados.append(nome_atual)
+                atualizados = list(dict.fromkeys(atualizados))
+                if atualizados == existentes:
+                    return False
+                perfil["contramagia"] = atualizados
+                perfil["respostas"] = [
+                    item for item in perfil.get("respostas", [])
+                    if item != "Contra-feitiço" or atualizados
+                ]
+                perfil.update(normalizar_perfil(perfil))
+                return True
+
+            await atualizar_perfil_relacionado(arquivo, atualizar_contramagia)
 
 
 def embed_painel(titulo: str, descricao: str = "") -> discord.Embed:
@@ -280,7 +462,7 @@ def resumo_perfil(sessao: SessaoFeitico) -> discord.Embed:
     faltas = pendencias(perfil)
     duracao = perfil.get("duracao", {})
     texto_duracao = linha_duracao(perfil) or "--"
-    for prefixo in ("Duração: ", "Duração de ", "Duração especial: "):
+    for prefixo in ("Duração: ",):
         if texto_duracao.startswith(prefixo):
             texto_duracao = texto_duracao[len(prefixo):]
             break
@@ -327,7 +509,8 @@ def resumo_perfil(sessao: SessaoFeitico) -> discord.Embed:
             f"Resposta: **{', '.join(perfil.get('respostas', [])) or '--'}**\n"
             f"Acúmulo: **{perfil.get('acumulo') or '--'}**\n"
             f"Encerramento: **{perfil.get('encerramento') or '--'}**\n"
-            f"Contra-feitiço: **{', '.join(perfil.get('contramagia', [])) or '--'}**"
+            f"Contra-feitiços deste feitiço: **{', '.join(perfil.get('contramagia', [])) or '--'}**\n"
+            f"Este feitiço é contra-feitiço de: **{', '.join(contra_feiticos_de(sessao.arquivo.stem)) or '--'}**"
         )[:1024],
         inline=False,
     )
@@ -388,11 +571,7 @@ class CategoriasRevisaoView(ViewPrivada):
         arquivos = arquivos_categoria(categoria)
         completos = 0
         for arquivo in arquivos:
-            try:
-                perfil = extrair_perfil(arquivo.read_text(encoding="utf-8"))
-            except (OSError, ValueError, json.JSONDecodeError):
-                perfil = None
-            if perfil and perfil.get("estado") == "completa":
+            if revisao_concluida(arquivo):
                 completos += 1
         return f"{completos}/{len(arquivos)} revisados"
 
@@ -649,6 +828,7 @@ class EditorFeiticoView(ViewPrivada):
             )
             return
         await interaction.response.defer()
+        perfil_anterior = extrair_perfil(self.sessao.arquivo.read_text(encoding="utf-8")) or {}
         criar_backup(self.sessao)
         self.sessao.perfil = normalizar_perfil(self.sessao.perfil)
         self.sessao.perfil["estado"] = "completa"
@@ -656,6 +836,9 @@ class EditorFeiticoView(ViewPrivada):
         salvar_revisao(self.sessao.arquivo, self.sessao.perfil, self.sessao.descricao)
         self.sessao.remover_rascunho()
         try:
+            await sincronizar_vinculos_contrafeitico(
+                interaction.client, self.sessao, perfil_anterior
+            )
             await sincronizar_publicacao_feitico(interaction.client, self.sessao)
         except (ErroPublicacaoFicha, discord.HTTPException):
             # A ficha local continua salva; informamos na tela para que a
@@ -1381,6 +1564,8 @@ def _momento_contra_atual(sessao: SessaoFeitico) -> str:
     contra = sessao.perfil.get("contra_feitico", {})
     if not contra.get("habilitado"):
         return "Não se aplica"
+    if not contra.get("momento"):
+        return "Pendente de configuração"
     momento = contra.get("momento", "")
     conversoes = {
         "Reação": "Reação imediata",
@@ -1670,6 +1855,7 @@ def resumo_defesa_contra(sessao: SessaoFeitico) -> discord.Embed:
             f"Defesa: **{defesa.get('momento') or 'Não é defesa'}** — {', '.join(defesa.get('propriedades', [])) or 'sem propriedades específicas'}\n"
             f"Uso como contra-feitiço: **{_momento_contra_atual(sessao)}**\n"
             f"Feitiços anulados por este: **{', '.join(contra.get('feiticos', [])) or '--'}**\n\n"
+            f"Este feitiço é contra-feitiço de: **{', '.join(contra_feiticos_de(sessao.arquivo.stem)) or '--'}**\n\n"
             "Escolha os momentos nos menus. Selecione os nomes dos feitiços diretamente na biblioteca."
         ),
     )
